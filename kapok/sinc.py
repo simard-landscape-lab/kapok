@@ -10,8 +10,9 @@
     S. R. Cloude, "Polarization coherence tomography," Radio Science,
     41, RS4017, 2006.  doi:10.1029/2005RS003436.
     
+    
     Author: Michael Denbina
-	
+    
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -27,7 +28,7 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-    
+
 """
 import numpy as np
 

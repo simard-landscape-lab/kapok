@@ -9,8 +9,9 @@
     and Navigation, vol. 150, no. 3, pp. 125-134, 2 June 2003.
     doi: 10.1049/ip-rsn:20030449
     
+    
     Author: Michael Denbina
-	
+    
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -26,7 +27,7 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-    
+
 """
 import collections
 import time
@@ -48,10 +49,8 @@ def groundsolver(gamma, kz=None, groundmag=None, gammavol=None,
             kz: The kz values.  If specified, the algorithm will choose
                 between the two ground coherence solutions by assuming that
                 the phase difference between the high coherence and the
-                ground is less than pi.  This is generally a reasonable
-                assumption, and often if this requirement is not observed,
-                the coherence will be low anyway.  If this behaviour is not
-                desired, see the gammvol argument for another method for
+                ground is less than pi.  If this behaviour is not
+                desired, see the gammavol argument for another method for
                 choosing between the ground coherences.  Note that only the
                 sign of kz, not the magnitude, matters here.  The input can
                 therefore either be the 2D array of kz values, or simply a

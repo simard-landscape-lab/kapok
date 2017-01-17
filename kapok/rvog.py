@@ -15,7 +15,7 @@
     method 'inv'.
     
     Author: Michael Denbina
-	
+    
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -31,7 +31,7 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-        
+
 """
 import numpy as np
 
@@ -39,5 +39,5 @@ try: # Import Cython Implementation
     import pyximport; pyximport.install(setup_args={"include_dirs":np.get_include()})
     from .rvogc import rvoginv, rvogfwdvol
 except ImportError: # Cython Import Failed
-    print('kapok.rvog | WARNING: Cython import failed.  Running in native Python (will be slow!).')
+    print('kapok.rvog | WARNING: Cython import failed.  Using native Python (will be slow).')
     from .rvogp import rvoginv, rvogfwdvol

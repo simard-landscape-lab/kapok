@@ -43,7 +43,6 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
     
 """
-
 import numpy as np
 from numpy import (array, sqrt, sin, cos, arcsin, arctan, arctan2, degrees)
 
@@ -331,7 +330,6 @@ class LookVectorSCH(SCH):
         return np.arccos(-self.h/r)
 
 
-
 def enu_to_xyz_matrix(lon, lat):
     """ENU to XYZ rotation matrix.
 
@@ -350,8 +348,8 @@ def enu_to_xyz_matrix(lon, lat):
 def sch2enu(s, c, h, peglat, peglon, peghdg):
     """Quick conversion from SCH to ENU coordinates.
     
-    Convert a point in the SCH coordinate system to ENU (East-North-Up)
-    coordinates, given the SCH peg location and heading.
+    Convert an array of points in the SCH coordinate system to ENU
+    (East-North-Up) coordinates, given the SCH peg location and heading.
     
     Arguments:
         s: Array containing S values, in meters.
@@ -362,8 +360,8 @@ def sch2enu(s, c, h, peglat, peglon, peghdg):
         peghdg: Heading of the SCH peg, in radians.
         
     Returns:
-        enu: Array containing ENU values, in meters.  Has dimensions (x,3)
-        if s, c, and h are arrays, where x is len(s).  If s, c, and h are
+        enu: Array containing ENU values, in meters.  Has dimensions
+        (s.shape,3) if s, c, and h are arrays.  If s, c, and h are
         scalar, enu has dimensions of (3).
     
     """
@@ -404,11 +402,76 @@ def sch2enu(s, c, h, peglat, peglon, peghdg):
     n = enumatrix[1,0]*x + enumatrix[1,1]*y + enumatrix[1,2]*z
     u = enumatrix[2,0]*x + enumatrix[2,1]*y + enumatrix[2,2]*z
     
+    if len(e.shape) > 0:       
+        enu = np.zeros((np.append(3,s.shape)),dtype='float32')
+        enu[0] = e
+        enu[1] = n
+        enu[2] = u
+        enu = np.moveaxis(enu,0,-1)
+    else:
+        enu = np.zeros((3),dtype='float32')
+        enu[0] = e
+        enu[1] = n
+        enu[2] = u
+
+    return enu
+    
+    
+def llh2enu(lon, lat, h, peglat, peglon, peghdg):
+    """Quick conversion from LLH to ENU coordinates.
+    
+    Convert an array of points in the LLH coordinate system to ENU
+    (East-North-Up) coordinates, given the SCH peg location and heading.
+    
+    Arguments:
+        lon: Array containing longitude values, in radians.
+        lat: Array containing latitude values, in radians.
+        h: Array containing height values, in meters.
+        peglat: Latitude of the SCH peg, in radians.
+        peglon: Longitude of the SCH peg, in radians.
+        peghdg: Heading of the SCH peg, in radians.
+        
+    Returns:
+        enu: Array containing ENU values, in meters.  Has dimensions
+        (lon.shape,3) if lon, lat, and h are arrays.  If lon, lat, and h are
+        scalar, enu has dimensions of (3).
+    
+    """
+    lon = np.array(lon)
+    lat = np.array(lat)
+    h = np.array(h)
+    
+    # Create origin peg object:
+    peg = np.array([peglon, peglat, peghdg])
+    peg = Peg(*peg)
+    
+    # Transform LLH to ECEF XYZ coordinates.
+    r = peg.ellipsoid.radius_east(lat)
+    x = (r + h) * np.cos(lat) * np.cos(lon)
+    y = (r + h) * np.cos(lat) * np.sin(lon)
+    z = (r * (1.0 - peg.ellipsoid.e2) + h) * np.sin(lat)
+    
+    # From ECEF XYZ to ENU:
+    originllh = LLH(peg()[0],peg()[1],0)
+    originxyz = originllh.xyz(ellipsoid=peg.ellipsoid)
+    
+    x -= originxyz()[0]
+    y -= originxyz()[1]
+    z -= originxyz()[2]    
+    
+    enumatrix = enu_to_xyz_matrix(peg()[0], peg()[1])
+    enumatrix = enumatrix.T
+       
+    e = enumatrix[0,0]*x + enumatrix[0,1]*y + enumatrix[0,2]*z
+    n = enumatrix[1,0]*x + enumatrix[1,1]*y + enumatrix[1,2]*z
+    u = enumatrix[2,0]*x + enumatrix[2,1]*y + enumatrix[2,2]*z
+    
     if len(e.shape) > 0:
-        enu = np.zeros((e.shape[0],3),dtype='float32')
-        enu[:,0] = e
-        enu[:,1] = n
-        enu[:,2] = u
+        enu = np.zeros((np.append(3,lon.shape)),dtype='float32')
+        enu[0] = e
+        enu[1] = n
+        enu[2] = u
+        enu = np.moveaxis(enu,0,-1)
     else:
         enu = np.zeros((3),dtype='float32')
         enu[0] = e

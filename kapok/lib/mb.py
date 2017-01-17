@@ -23,7 +23,7 @@
     All baseline and track and polarization indices start with 0.
 
     Author: Maxim Neumann
-	
+    
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -44,13 +44,13 @@
 import numpy as np
 
 
-def mb_n_baseline(n_tr):
-    """Returns number of baselines, based on given number of tracks"""
+def mb_num_baselines(n_tr):
+    """Returns number of baselines, based on given number of tracks."""
     return int(n_tr * (n_tr-1) / 2)
     
     
-def mb_n_track(n_bl):
-    """Returns number of tracks, based on given number of baselines"""
+def mb_num_tracks(n_bl):
+    """Returns number of tracks, based on given number of baselines."""
     return ((1 + np.sqrt(1 + 8*n_bl))/2).astype('int')
     
 
@@ -59,9 +59,12 @@ def mb_tr_index(bl):
 
     Based on the triangular number calculations.
     """
-    j = np.floor((1+np.sqrt(1+8*(bl)))/2).astype(int)
-    i = (bl - j*(j-1)/2).astype(int)
-    return (i,j)
+    if bl >= 0:
+        j = np.floor((1+np.sqrt(1+8*(bl)))/2).astype(int)
+        i = (bl - j*(j-1)/2).astype(int)
+        return (i,j)
+    else:
+        return None
 
 
 def mb_bl_index(tr1, tr2):
@@ -71,19 +74,21 @@ def mb_bl_index(tr1, tr2):
     and same baseline returned.
     """
     if tr1 == tr2:
-        print("ERROR: no baseline between same tracks")
+        print("ERROR: No baseline between same tracks.")
         return None
     if tr1 > tr2:
-        print("WARNING: tr1 exoected < than tr2")
+        print("WARNING: tr1 expected < than tr2.")
     mx = max(tr1, tr2)
     bl = np.array(mx*(mx-1)/2 + min(tr1, tr2))
     return bl.astype(int)
 
 
 def mb_cov_index(bl, pol=0, pol2=None, n_pol=3):
-    """Returns i,j covariance matrix indices for given baseline and pol index.
+    """Returns row,col covariance matrix indices for given baseline and pol
+        index.
 
-    If polb is not given, then same polarization is assumed (e.g. HH-HH, vs. HH-VV)
+        If polb is not given, then same polarization is assumed (e.g. HH-HH,
+        vs. HH-VV).
     """
     t1, t2 = mb_tr_index(bl)
     p1, p2 = pol, pol if pol2 is None else pol2

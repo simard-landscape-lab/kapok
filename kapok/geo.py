@@ -22,8 +22,10 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
     
+
+    
 """
-import platform
+import os
 import subprocess
 import sys
 
@@ -64,16 +66,14 @@ def radar2ll(outpath, datafile, data, lat, lon, outformat='ENVI',
             Default is 'bilinear'.  For reference and more options, see
             http://www.gdal.org/gdalwarp.html.
     
-    """
+    """   
     if sys.byteorder == 'little':
         byte = 'LSB'
     else:
         byte = 'MSB'
         
     if outpath != '':
-        outpath = outpath + '/'
-    
-        
+        outpath = outpath + '/'        
         
     # Save the lat/lon to temporary flat binary files.
     lat.tofile(outpath+'templat.dat')
@@ -140,27 +140,18 @@ def radar2ll(outpath, datafile, data, lat, lon, outformat='ENVI',
         
     # Call gdalwarp:
     command = 'gdalwarp -overwrite -geoloc -t_srs EPSG:4326 -ot Float32 -r '+resampling+' -of '+outformat+' '+outpath+'tempdata.vrt '+outpath+datafile
+    print(command)
     print(subprocess.getoutput(command))
     
     
     # Remove temporary files.
-    if 'Windows' in platform.system():
-        remcmd = 'del '
-    else:
-        remcmd = 'rm '
-        
-    command = remcmd+outpath+'templat.dat'
-    print(subprocess.getoutput(command))
-    command = remcmd+outpath+'templat.vrt'
-    print(subprocess.getoutput(command))
-    command = remcmd+outpath+'templon.dat'
-    print(subprocess.getoutput(command))
-    command = remcmd+outpath+'templon.vrt'
-    print(subprocess.getoutput(command))
-    command = remcmd+outpath+'tempdata.dat'
-    print(subprocess.getoutput(command))
-    command = remcmd+outpath+'tempdata.vrt'
-    print(subprocess.getoutput(command))
+    os.remove(outpath+'templat.dat')
+    os.remove(outpath+'templat.vrt')
+    os.remove(outpath+'templon.dat')
+    os.remove(outpath+'templon.vrt')
+    os.remove(outpath+'tempdata.dat')
+    os.remove(outpath+'tempdata.vrt')
+    
     
     return
     

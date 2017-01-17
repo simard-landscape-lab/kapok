@@ -6,6 +6,13 @@
     separation in the complex plane.  The actual code for this module is in
     cohoptc.pyx.  This file is just a wrapper that imports the Cython code.
     
+    See the following paper for reference on coherence region estimation:
+    
+    T. Flynn, M. Tabb and R. Carande, "Coherence region shape extraction
+    for vegetation parameter estimation in polarimetric SAR interferometry,"
+    Proceedings of the 2002 International Geoscience and Remote Sensing
+    Symposium, 2002.  doi: 10.1109/IGARSS.2002.1026712
+    
     Author: Michael Denbina
 	
     Copyright 2016 California Institute of Technology.  All rights reserved.
@@ -31,5 +38,5 @@ try: # Import Cython Implementation
     import pyximport; pyximport.install(setup_args={"include_dirs":np.get_include()})
     from .cohoptc import pdopt, pdopt_pixel
 except ImportError: # Cython Import Failed
-    print('kapok.cohopt | WARNING: Cython import failed.  Running in native Python (will be slow!).')
+    print('kapok.cohopt | WARNING: Cython import failed.  Using native Python (will be slow).')
     from .cohoptp import pdopt, pdopt_pixel

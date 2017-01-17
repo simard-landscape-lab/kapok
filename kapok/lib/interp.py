@@ -2,25 +2,26 @@
 """Interpolation functions.
 
     Author: Michael Denbina
-	
+    
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
-    
+
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
-    
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
-    
+
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-    
+
 """
 import numpy as np
+from scipy import ndimage as nd
 
 
 def bilinear_interpolate(data, x, y):
@@ -76,4 +77,20 @@ def bilinear_interpolate(data, x, y):
     intdata = w_ll*data_ll + w_ul*data_ul + w_lr*data_lr + w_ur*data_ur
 
     return intdata
+    
+    
+def nnfill(data):
+    """Function to fill nan values in a 2D array using nearest neighbor
+    interpolation.
+    
+    Arguments:
+        data (array): A 2D array containing the data to fill.  Void elements
+            should have values of np.nan.
+    
+    Returns:
+        filled (array): The filled data.
+    
+    """
+    ind = nd.distance_transform_edt(np.isnan(data), return_distances=False, return_indices=True)
+    return data[tuple(ind)]
     

@@ -3,11 +3,11 @@
 """Random Volume Over Ground (RVoG) Forest Model Inversion
 
     Contains functions for the forward RVoG model, and inversion.  This is
-    Python code which the rvog.py wrapper module defaults to when the Cython
+    Python code which the rvog.py wrapper module falls back to when the Cython
     import fails.
     
     Author: Michael Denbina
-	
+    
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -22,7 +22,7 @@
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.  
     
 """
 import collections
@@ -160,9 +160,9 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
             limit2pi (bool): If True, function will not allow hv to go above
                 the 2*pi (ambiguity) height (as determined by the kz values).
                 If False, no such restriction.  Default: True.
-            hv_min (float): Minimum allowed hv value, in meters.
+            hv_min (float or array): Minimum allowed hv value, in meters.
                 Default: 0.
-            hv_max (float): Maximum allowed hv value, in meters.
+            hv_max (float or array): Maximum allowed hv value, in meters.
                 Default: 50.
             hv_step (float): Function will perform consecutive searches with
                 progressively smaller step sizes, until the step size
@@ -195,10 +195,23 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
         limit2pi = np.ones(dim, dtype='bool')
     elif np.all(limit2pi == False):
         limit2pi = np.zeros(dim, dtype='bool')
-
-       
+        
+    if isinstance(hv_max, (collections.Sequence, np.ndarray)):
+        hv_max_clip = hv_max.copy()[mask]
+        hv_max = np.nanmax(hv_max)
+    else:
+        hv_max_clip = None
+        
+    if isinstance(hv_min, (collections.Sequence, np.ndarray)):
+        hv_min_clip = hv_min.copy()[mask]
+        hv_min = np.nanmin(hv_min)
+    else:
+        hv_min_clip = None
+    
+    
     hv_samples = int((hv_max-hv_min+1)*3) # Initial Number of hv Bins in Search Grid
     hv_vector = np.linspace(hv_min, hv_max, num=hv_samples)
+    
     
     if tdf is not None:
         ext_samples = 60
@@ -263,7 +276,7 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
     convergedclip = np.ones(gammaclip.shape,dtype='bool')
     threshold = 0.01 # threshold for convergence
     
-    print('kapok.rvog.rvoginv | Performing rekapoked searches over smaller parameter ranges until hv step size is less than '+str(hv_step)+' m.')
+    print('kapok.rvog.rvoginv | Performing repeated searches over smaller parameter ranges until hv step size is less than '+str(hv_step)+' m.')
     print('kapok.rvog.rvoginv | Beginning pass #1 with hv step size: '+str(np.round(hv_vector[1]-hv_vector[0],decimals=3))+' m. ('+time.ctime()+')')
     
 
@@ -295,9 +308,22 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
             ind_limit = limit2piclip & (hv_val > np.abs(2*np.pi/kzclip))
             if np.any(ind_limit):
                 dist[ind_limit] = 1e10
-
+            
+            # If hv_min and hv_max were set to arrays,
+            # ensure that solutions outside of the bounds are excluded.
+            if hv_min_clip is not None:
+                ind_limit = (hv_val < hv_min_clip)
+                if np.any(ind_limit):
+                    dist[ind_limit] = 1e10
+            
+            if hv_max_clip is not None:
+                ind_limit = (hv_val > hv_max_clip)
+                if np.any(ind_limit):
+                    dist[ind_limit] = 1e10
+            
+            
             # Best solution so far?                 
-            ind = np.less(dist,mindist)
+            ind = dist < mindist
             
             # Then update:
             if np.any(ind):
@@ -366,7 +392,20 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
                 ind_limit = limit2piclip & (hv_val > np.abs(2*np.pi/kzclip))
                 if np.any(ind_limit):
                     dist[ind_limit] = 1e10
-    
+                
+                # If hv_min and hv_max were set to arrays,
+                # ensure that solutions outside of the bounds are excluded.
+                if hv_min_clip is not None:
+                    ind_limit = (hv_val < hv_min_clip)
+                    if np.any(ind_limit):
+                        dist[ind_limit] = 1e10
+                
+                if hv_max_clip is not None:
+                    ind_limit = (hv_val > hv_max_clip)
+                    if np.any(ind_limit):
+                        dist[ind_limit] = 1e10
+                
+                
                 # Best solution so far? 
                 ind = np.less(dist,mindist)
                 
@@ -378,8 +417,8 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
                         extfit[ind] = ext_val[ind]
                     else:
                         tdffit[ind] = tdf_val[ind]
-                        
-
+                
+                
                 # Increment the extinction:        
                 ext_val += ext_inc
 

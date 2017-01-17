@@ -6,7 +6,7 @@
     written in Cython for increased speed.  Imported by main rvog module.
     
     Author: Michael Denbina
-	
+    
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -22,7 +22,7 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-    
+
 """
 import collections
 import time
@@ -36,7 +36,7 @@ np.import_ufunc()
 
 
 
-def rvogfwdvol(hv, ext, inc, kz):
+def rvogfwdvol(hv, ext, inc, kz, rngslope=0.0):
     """RVoG forward model volume coherence.
     
     For a given set of model parameters, calculate the RVoG model coherence.
@@ -46,44 +46,64 @@ def rvogfwdvol(hv, ext, inc, kz):
         ext: Wave extinction within the forest volume, in Np/m.
         inc: Incidence angle, in radians.
         kz: Interferometric vertical wavenumber, in radians/meter.
+        rngslope: Range-facing terrain slope angle, in radians.  If not
+            specified, flat terrain is assumed.
             
     Returns:
         gamma: Modelled complex coherence.
 
     """
-    p1 = 2*ext*np.cos(inc)
+    # Check if scalar or array extinction.
+    if isinstance(ext, (collections.Sequence, np.ndarray)):
+        extscalar = False
+    else:
+        extscalar = True
+        
+    # Check for Zero Extinction And Limit to Lower Bound of 1e-10 Np/m
+    if extscalar and (ext <= 1e-10):
+        ext = 1e-10
+    elif not extscalar:
+        ind = (ext <= 1e-10)
+        if np.any(ind):
+            ext[ind] = 1e-10
+    
+    
+    # Calculate volume coherence.
+    p1 = 2*ext*np.cos(rngslope)/np.cos(inc-rngslope)
     p2 = p1 + 1j*kz
     
     gammav = (p1 / p2) * (np.exp(p2*hv)-1) / (np.exp(p1*hv)-1)
+    
     
     # Check if scalar or array hv.
     if isinstance(hv, (collections.Sequence, np.ndarray)):
         hvscalar = False
     else:
         hvscalar = True
-    
+        
     # Check for Zero Forest Height
     if hvscalar and (hv <= 0):
         gammav[:] = 1.0
-    else:
+    elif not hvscalar:
         ind = (hv <= 0)
         if np.any(ind):
             gammav[ind] = 1.0
-    
-    # Check for Non-Finite Volume Coherence (very large p1--extinction essentially infinite)    
+                
+    # Check for Non-Finite Volume Coherence (indicates very large p1--extinction essentially infinite)    
     ind = ~np.isfinite(gammav)
     if np.any(ind):
         if hvscalar:
             gammav[ind] = np.exp(1j*hv*kz[ind])
         else:
             gammav[ind] = np.exp(1j*hv[ind]*kz[ind])
-    
+            
+
     return gammav
     
     
-def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, mask=None,
-            limit2pi=True, hv_min=0, hv_max=50, hv_step=0.01, ext_min=0.0115,
-            ext_max=0.115):
+def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
+            mask=None, limit2pi=True, hv_min=0, hv_max=50, hv_step=0.01,
+            ext_min=0.0115, ext_max=0.115):
     """RVoG model inversion.
     
         Calculate the RVoG model parameters which produce a modelled coherence
@@ -137,15 +157,17 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, mask=None,
                 function will fix tdf to 1.  Default: None.
             mu: Fixed values for the ground-to-volume scattering ratio of
                 gamma.  Default: 0.
+            rngslope (array): Terrain slope angle in the ground range
+                direction, in radians.  Default: 0 (flat terrain).
             mask (array): Boolean array.  Pixels where (mask == True) will be
                 inverted, while pixels where (mask == False) will be ignored,
                 and hv set to -1.
             limit2pi (bool): If True, function will not allow hv to go above
                 the 2*pi (ambiguity) height (as determined by the kz values).
                 If False, no such restriction.  Default: True.
-            hv_min (float): Minimum allowed hv value, in meters.
+            hv_min (float or array): Minimum allowed hv value, in meters.
                 Default: 0.
-            hv_max (float): Maximum allowed hv value, in meters.
+            hv_max (float or array): Maximum allowed hv value, in meters.
                 Default: 50.
             hv_step (float): Function will perform consecutive searches with
                 progressively smaller step sizes, until the step size
@@ -178,10 +200,23 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, mask=None,
         limit2pi = np.ones(dim, dtype='bool')
     elif np.all(limit2pi == False):
         limit2pi = np.zeros(dim, dtype='bool')
-
-       
+        
+    if isinstance(hv_max, (collections.Sequence, np.ndarray)):
+        hv_max_clip = hv_max.copy()[mask]
+        hv_max = np.nanmax(hv_max)
+    else:
+        hv_max_clip = None
+        
+    if isinstance(hv_min, (collections.Sequence, np.ndarray)):
+        hv_min_clip = hv_min.copy()[mask]
+        hv_min = np.nanmin(hv_min)
+    else:
+        hv_min_clip = None
+    
+    
     hv_samples = int((hv_max-hv_min+1)*3) # Initial Number of hv Bins in Search Grid
     hv_vector = np.linspace(hv_min, hv_max, num=hv_samples)
+    
     
     if tdf is not None:
         ext_samples = 60
@@ -208,7 +243,12 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, mask=None,
         muclip = None
     else:
         muclip = np.ones(gammaclip.shape, dtype='float32') * mu
-           
+        
+    if isinstance(rngslope, (collections.Sequence, np.ndarray)):
+        rngslopeclip = rngslope[mask]
+    else:
+        rngslopeclip = np.ones(gammaclip.shape, dtype='float32') * rngslope
+    
     if isinstance(ext, (collections.Sequence, np.ndarray)):
         extclip = ext[mask]
     elif isinstance(ext, dict):
@@ -255,14 +295,14 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, mask=None,
                 if isinstance(tdf, dict):
                     tdfclip = np.interp(hv_val, tdf['x'], tdf['y'])
                     
-                gammav_model = rvogfwdvol(hv_val, ext_val, incclip, kzclip)
+                gammav_model = rvogfwdvol(hv_val, ext_val, incclip, kzclip, rngslope=rngslopeclip)
                 gamma_model = phiclip * (muclip + tdfclip*gammav_model) / (muclip + 1)
                 dist = np.abs(gammaclip - gamma_model)
             else:
                 if isinstance(ext, dict):
                     extclip = np.interp(hv_val, ext['x'], ext['y'])
                     
-                gammav_model = rvogfwdvol(hv_val, extclip, incclip, kzclip)
+                gammav_model = rvogfwdvol(hv_val, extclip, incclip, kzclip, rngslope=rngslopeclip)
                 tdf_val = np.abs((gammaclip*(muclip+1) - phiclip*muclip)/(phiclip*gammav_model))
                 gamma_model = phiclip * (muclip + tdf_val*gammav_model) / (muclip + 1)
                 dist = np.abs(gammaclip - gamma_model)
@@ -273,9 +313,22 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, mask=None,
             ind_limit = limit2piclip & (hv_val > np.abs(2*np.pi/kzclip))
             if np.any(ind_limit):
                 dist[ind_limit] = 1e10
-
+            
+            # If hv_min and hv_max were set to arrays,
+            # ensure that solutions outside of the bounds are excluded.
+            if hv_min_clip is not None:
+                ind_limit = (hv_val < hv_min_clip)
+                if np.any(ind_limit):
+                    dist[ind_limit] = 1e10
+            
+            if hv_max_clip is not None:
+                ind_limit = (hv_val > hv_max_clip)
+                if np.any(ind_limit):
+                    dist[ind_limit] = 1e10
+            
+            
             # Best solution so far?                 
-            ind = np.less(dist,mindist)
+            ind = dist < mindist
             
             # Then update:
             if np.any(ind):
@@ -326,14 +379,14 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, mask=None,
                     if isinstance(tdf, dict):
                         tdfclip = np.interp(hv_val, tdf['x'], tdf['y'])
                         
-                    gammav_model = rvogfwdvol(hv_val, ext_val, incclip, kzclip)
+                    gammav_model = rvogfwdvol(hv_val, ext_val, incclip, kzclip, rngslope=rngslopeclip)
                     gamma_model = phiclip * (muclip + tdfclip*gammav_model) / (muclip + 1)
                     dist = np.abs(gammaclip - gamma_model)
                 else:
                     if isinstance(ext, dict):
                         extclip = np.interp(hv_val, ext['x'], ext['y'])
                         
-                    gammav_model = rvogfwdvol(hv_val, extclip, incclip, kzclip)
+                    gammav_model = rvogfwdvol(hv_val, extclip, incclip, kzclip, rngslope=rngslopeclip)
                     tdf_val = np.abs((gammaclip*(muclip+1) - phiclip*muclip)/(phiclip*gammav_model))
                     gamma_model = phiclip * (muclip + tdf_val*gammav_model) / (muclip + 1)
                     dist = np.abs(gammaclip - gamma_model)
@@ -344,7 +397,20 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, mask=None,
                 ind_limit = limit2piclip & (hv_val > np.abs(2*np.pi/kzclip))
                 if np.any(ind_limit):
                     dist[ind_limit] = 1e10
-    
+                
+                # If hv_min and hv_max were set to arrays,
+                # ensure that solutions outside of the bounds are excluded.
+                if hv_min_clip is not None:
+                    ind_limit = (hv_val < hv_min_clip)
+                    if np.any(ind_limit):
+                        dist[ind_limit] = 1e10
+                
+                if hv_max_clip is not None:
+                    ind_limit = (hv_val > hv_max_clip)
+                    if np.any(ind_limit):
+                        dist[ind_limit] = 1e10
+                
+                
                 # Best solution so far? 
                 ind = np.less(dist,mindist)
                 
@@ -356,8 +422,8 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, mask=None,
                         extfit[ind] = ext_val[ind]
                     else:
                         tdffit[ind] = tdf_val[ind]
-                        
-
+                
+                
                 # Increment the extinction:        
                 ext_val += ext_inc
 

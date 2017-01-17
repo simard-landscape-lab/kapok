@@ -6,7 +6,7 @@
     user-specified parameter values.
     
     Author: Michael Denbina
-	
+    
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -22,7 +22,7 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-    
+
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -36,7 +36,8 @@ from kapok.lib import makehermitian, mb_cov_index
 sliders = [] # array to store slider objects for interactive coherence region (if we don't keep a reference to them, they can become unresponsive)
 
 
-def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None):
+def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None,
+              reg=0.0):
     """Plot a coherence region for a given covariance matrix.
     
         The following coherences are plotted: HH, HV, VV, HH+VV, HH-VV
@@ -49,8 +50,8 @@ def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None):
         ground solution which wasn't chosen is shown as an orange dot.
     
         Arguments:
-            scene (object): A kapok.Scene object containing covariance matrix and
-                other data.
+            scene (object): A kapok.Scene object containing covariance matrix
+                and other data.
             az (int): Azimuth index of the plotted coherence region.
             rng (int): Range index of the plotted coherence region.
             bl (int): Baseline index of the plotted coherence region.
@@ -59,6 +60,8 @@ def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None):
                 annotated on the plot.
             title (str): Title string to put at the top of the plot.
             savefile (str): Path and filename to save the figure, if desired.
+            reg (float): Optimization regularization argument passed to
+                kapok.cohopt.pdopt_pixel.  Default: 0.0 (no regularization).
         
     """
     row, col = mb_cov_index(bl)
@@ -67,18 +70,14 @@ def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None):
                          + scene.cov[az,rng,col:col+scene.num_pol,col:col+scene.num_pol]))
     om = scene.cov[az,rng,row:row+scene.num_pol,col:col+scene.num_pol]
     
-    gammahigh, gammalow, gammaall = kapok.cohopt.pdopt_pixel(tm, om)
+    gammahigh, gammalow, gammaall = kapok.cohopt.pdopt_pixel(tm, om, reg=reg)
     gammahh = scene.coh(pol=0, bl=bl, pix=(az,rng))
     gammahv = scene.coh(pol=1, bl=bl, pix=(az,rng))
     gammavv = scene.coh(pol=2, bl=bl, pix=(az,rng))
     gammahhpvv = scene.coh(pol=[1,0,1], bl=bl, pix=(az,rng))
     gammahhmvv = scene.coh(pol=[1,0,-1], bl=bl, pix=(az,rng))
     
-    if scene.num_baselines > 1:
-        kz = scene.kz[bl,az,rng]
-    else:
-        kz = scene.kz[az,rng]
-    
+    kz = scene.kz(bl)[az,rng]   
 
     # Create the figure.
     plt.figure()
@@ -111,11 +110,11 @@ def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None):
     groundalt = groundalt[0,0]
      
     # Plot region.
-    plt.plot(np.real(gammaall),np.imag(gammaall),'-',markersize=8,label='Region')
+    plt.plot(np.real(gammaall),np.imag(gammaall),'-',linewidth=3,markersize=8,label='Region')
     
     # Plot the fitted line.
     gammaline = np.array((ground,gammalow,gammahigh),dtype='complex')
-    plt.plot(np.real(gammaline),np.imag(gammaline),'--g',label='Line Fit')
+    plt.plot(np.real(gammaline),np.imag(gammaline),'--g',linewidth=3,label='Line Fit')
 
 
     # Plot Lexicographic and Pauli coherences.
@@ -126,8 +125,8 @@ def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None):
     plt.plot(np.real(gammahhmvv),np.imag(gammahhmvv),'.m',markersize=20,label='HH-VV')
     
     # Plot optimized high and low coherences.
-    plt.plot(np.real(gammahigh),np.imag(gammahigh),'.',color='DarkGreen',markersize=20,label='PD High')
-    plt.plot(np.real(gammalow),np.imag(gammalow),'.',color='Maroon',markersize=20,label='PD Low')
+    plt.plot(np.real(gammahigh),np.imag(gammahigh),'.',color='DarkGreen',markersize=20,label='Opt. High')
+    plt.plot(np.real(gammalow),np.imag(gammalow),'.',color='Maroon',markersize=20,label='Opt. Low')
     
     # Plot ground coherences.
     plt.plot(np.real(ground),np.imag(ground),'.k',markersize=20,label='Ground')
@@ -138,8 +137,8 @@ def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None):
         azslc = (mlwin[0]*az, mlwin[0]*az + (mlwin[0]-1))
         rngslc = (mlwin[1]*rng, mlwin[1]*rng + (mlwin[1]-1))
         plt.text(0.975,0.94,'SLC Coordinates', fontsize=10, horizontalalignment='right')
-        plt.text(0.975,0.89,'Azimuth: '+str(azslc[0])+'—'+str(azslc[1]), fontsize=10, horizontalalignment='right')
-        plt.text(0.975,0.84,'Range: '+str(rngslc[0])+'—'+str(rngslc[1]), fontsize=10,horizontalalignment='right')
+        plt.text(0.975,0.89,'Azimuth: '+str(azslc[0])+'–'+str(azslc[1]), fontsize=10, horizontalalignment='right')
+        plt.text(0.975,0.84,'Range: '+str(rngslc[0])+'–'+str(rngslc[1]), fontsize=10,horizontalalignment='right')
 
 
     # Plot Title
@@ -163,7 +162,7 @@ def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None):
     return
 
 
-def rvogregion(scene=None, az=None, rng=None, bl=0):
+def rvogregion(scene=None, az=None, rng=None, bl=0, reg=0.0):
     """Interactive coherence region plot with sliders for the RVoG model
         parameters.
         
@@ -199,6 +198,8 @@ def rvogregion(scene=None, az=None, rng=None, bl=0):
             az (int): Azimuth index of the plotted coherence region.
             rng (int): Range index of the plotted coherence region.
             bl (int): Baseline index of the plotted coherence region.
+            reg (float): Optimization regularization argument passed to
+                kapok.cohopt.pdopt_pixel.  Default: 0.0 (no regularization).
         
     """
     # Create the figure.
@@ -225,18 +226,14 @@ def rvogregion(scene=None, az=None, rng=None, bl=0):
                            + scene.cov[az,rng,col:col+scene.num_pol,col:col+scene.num_pol]))
         om = scene.cov[az,rng,row:row+scene.num_pol,col:col+scene.num_pol]
         
-        gammahigh, gammalow, gammaall = kapok.cohopt.pdopt_pixel(tm, om)
+        gammahigh, gammalow, gammaall = kapok.cohopt.pdopt_pixel(tm, om, reg=reg)
         gammahh = scene.coh(pol=0, bl=bl, pix=(az,rng))
         gammahv = scene.coh(pol=1, bl=bl, pix=(az,rng))
         gammavv = scene.coh(pol=2, bl=bl, pix=(az,rng))
         gammahhpvv = scene.coh(pol=[1,0,1], bl=bl, pix=(az,rng))
         gammahhmvv = scene.coh(pol=[1,0,-1], bl=bl, pix=(az,rng))
         
-        if scene.num_baselines > 1:
-            kz = scene.kz[bl,az,rng]
-        else:
-            kz = scene.kz[az,rng]
-            
+        kz = scene.kz(bl)[az,rng]            
         inc = scene.inc[az,rng]
         
         # Do a line fit to get the ground coherences.
@@ -253,11 +250,11 @@ def rvogregion(scene=None, az=None, rng=None, bl=0):
         groundalt = groundalt[0,0]
          
         # Plot region.
-        plt.plot(np.real(gammaall),np.imag(gammaall),'-',markersize=8,label='Region')
+        plt.plot(np.real(gammaall),np.imag(gammaall),'-',markersize=8,linewidth=3,label='Region')
         
         # Plot the fitted line.
         gammaline = np.array((ground,gammalow,gammahigh),dtype='complex')
-        plt.plot(np.real(gammaline),np.imag(gammaline),'--g',label='Line Fit')
+        plt.plot(np.real(gammaline),np.imag(gammaline),'--g',linewidth=3,label='Line Fit')
     
         # Plot Lexicographic and Pauli coherences.
         plt.plot(np.real(gammahh),np.imag(gammahh),'.r',markersize=20,label='HH')
@@ -267,8 +264,8 @@ def rvogregion(scene=None, az=None, rng=None, bl=0):
         plt.plot(np.real(gammahhmvv),np.imag(gammahhmvv),'.m',markersize=20,label='HH-VV')
         
         # Plot optimized high and low coherences.
-        plt.plot(np.real(gammahigh),np.imag(gammahigh),'.',color='DarkGreen',markersize=20,label='PD High')
-        plt.plot(np.real(gammalow),np.imag(gammalow),'.',color='Maroon',markersize=20,label='PD Low')
+        plt.plot(np.real(gammahigh),np.imag(gammahigh),'.',color='DarkGreen',markersize=20,label='Opt. High')
+        plt.plot(np.real(gammalow),np.imag(gammalow),'.',color='Maroon',markersize=20,label='Opt. Low')
         
         # Plot ground coherences.
         plt.plot(np.real(ground),np.imag(ground),'.k',markersize=20,label='Ground')
@@ -302,11 +299,11 @@ def rvogregion(scene=None, az=None, rng=None, bl=0):
     gammav = (p1 / p2) * (np.exp(p2*hv_vector)-1) / (np.exp(p1*hv_vector)-1)
     gammahigh = ground * (mu_high + alpha*gammav) / (mu_high + 1)
     gammalow = ground * (mu_low + alpha*gammav[-1]) / (mu_low + 1)
-    rvoglocus = np.array([gammahigh[-1],gammalow],dtype='complex')   
+    rvoglocus = np.array([gammahigh[-1],gammalow],dtype='complex')
     
     # Plot RVoG coherences.
-    l1 = plt.plot(np.real(gammahigh),np.imag(gammahigh), '--', color='Black')[0]
-    l2 = plt.plot(np.real(rvoglocus),np.imag(rvoglocus),'-xg', color='Black', label='RVoG Model')[0]
+    l1 = plt.plot(np.real(gammahigh),np.imag(gammahigh), '--', markersize=20, linewidth=3, color='YellowGreen')[0]
+    l2 = plt.plot(np.real(rvoglocus),np.imag(rvoglocus),'.-', markersize=20, linewidth=3, color='YellowGreen', label='RVoG Model')[0]
     
     plt.axis([-1, 1, -1, 1])
     ax.set_aspect('equal')
