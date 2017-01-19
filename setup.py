@@ -65,11 +65,6 @@ setup(
     
     # Required Packages
     install_requires=['numpy', 'scipy', 'matplotlib', 'h5py', 'cython', 'gdal'],
-
-    # Package for Automated Testing
-    extras_require={
-        'test': ['nose'],
-    },
     
     # Cython Modules
     ext_modules = cythonize(['kapok/cohoptc.pyx', 'kapok/rvogc.pyx', 'kapok/uavsarc.pyx']),

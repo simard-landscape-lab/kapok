@@ -82,9 +82,8 @@ def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None,
     # Create the figure.
     plt.figure()
     fig = plt.gcf()
-    plt.hold(True)
- 
-   
+    
+    
     # Circles with 0.25, 0.5, 0.75, and 1.0 radius.
     unitcirc = plt.Circle((0,0),1,color='k',fill=False,linestyle='dashed')
     threequartercirc = plt.Circle((0,0),0.75,color='k',fill=False,linestyle='dashed')
@@ -205,9 +204,8 @@ def rvogregion(scene=None, az=None, rng=None, bl=0, reg=0.0):
     # Create the figure.
     fig, ax = plt.subplots()
     plt.subplots_adjust(bottom=0.3)
-    plt.hold(True)
- 
-   
+    
+    
     # Circles with 0.25, 0.5, 0.75, and 1.0 radius.
     unitcirc = plt.Circle((0,0),1,color='k',fill=False,linestyle='dashed')
     threequartercirc = plt.Circle((0,0),0.75,color='k',fill=False,linestyle='dashed')

@@ -35,7 +35,6 @@ np.import_array()
 np.import_ufunc()
 
 
-
 def rvogfwdvol(hv, ext, inc, kz, rngslope=0.0):
     """RVoG forward model volume coherence.
     
@@ -72,7 +71,8 @@ def rvogfwdvol(hv, ext, inc, kz, rngslope=0.0):
     p1 = 2*ext*np.cos(rngslope)/np.cos(inc-rngslope)
     p2 = p1 + 1j*kz
     
-    gammav = (p1 / p2) * (np.exp(p2*hv)-1) / (np.exp(p1*hv)-1)
+    with np.errstate(divide='ignore',invalid='ignore'):
+        gammav = (p1 / p2) * (np.exp(p2*hv)-1) / (np.exp(p1*hv)-1)
     
     
     # Check if scalar or array hv.
@@ -103,7 +103,7 @@ def rvogfwdvol(hv, ext, inc, kz, rngslope=0.0):
     
 def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
             mask=None, limit2pi=True, hv_min=0, hv_max=50, hv_step=0.01,
-            ext_min=0.0115, ext_max=0.115):
+            ext_min=0.0115, ext_max=0.115, silent=False):
     """RVoG model inversion.
     
         Calculate the RVoG model parameters which produce a modelled coherence
@@ -176,6 +176,8 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
                 Default: 0.0115 Np/m (~0.1 dB/m).
             ext_max (float): Maximum extinction value, in Np/m.
                 Default: 0.115 Np/m (~1 dB/m).
+            silent (bool): Set to True to suppress status updates.  Default:
+                False.
             
         Returns:
             hvmap (array): Array of inverted forest height values, in meters.
@@ -190,7 +192,8 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
                 parameter estimates may be invalid.
     
     """
-    print('kapok.rvog.rvoginv | Beginning RVoG model inversion. ('+time.ctime()+')')
+    if not silent:
+        print('kapok.rvog.rvoginv | Beginning RVoG model inversion. ('+time.ctime()+')')
     dim = np.shape(gamma)
     
     if mask is None:
@@ -239,7 +242,8 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
     if isinstance(mu, (collections.Sequence, np.ndarray)):
         muclip = mu[mask]
     elif isinstance(mu, dict):
-        print('kapok.rvog.rvoginv | Using LUT for mu as a function of forest height.')
+        if not silent:        
+            print('kapok.rvog.rvoginv | Using LUT for mu as a function of forest height.')
         muclip = None
     else:
         muclip = np.ones(gammaclip.shape, dtype='float32') * mu
@@ -252,14 +256,16 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
     if isinstance(ext, (collections.Sequence, np.ndarray)):
         extclip = ext[mask]
     elif isinstance(ext, dict):
-        print('kapok.rvog.rvoginv | Using LUT for extinction as a function of forest height.')
+        if not silent:
+            print('kapok.rvog.rvoginv | Using LUT for extinction as a function of forest height.')
         extclip = None
     elif ext is not None:
         extclip = np.ones(gammaclip.shape, dtype='float32') * ext
     elif isinstance(tdf, (collections.Sequence, np.ndarray)):
         tdfclip = tdf[mask]
     elif isinstance(tdf, dict):
-        print('kapok.rvog.rvoginv | Using LUT for temporal decorrelation magnitude as a function of forest height.')
+        if not silent:
+            print('kapok.rvog.rvoginv | Using LUT for temporal decorrelation magnitude as a function of forest height.')
         tdfclip = None
     elif tdf is not None:
         tdfclip = np.ones(gammaclip.shape, dtype='float32') * tdf
@@ -270,10 +276,12 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
     
     if ext is None:
         extfit = np.zeros(gammaclip.shape, dtype='float32')
-        print('kapok.rvog.rvoginv | Solving for forest height and extinction, with fixed temporal decorrelation.')
+        if not silent:
+            print('kapok.rvog.rvoginv | Solving for forest height and extinction, with fixed temporal decorrelation.')
     else:
         tdffit = np.zeros(gammaclip.shape, dtype='float32')
-        print('kapok.rvog.rvoginv | Solving for forest height and temporal decorrelation magnitude, with fixed extinction.')
+        if not silent:
+            print('kapok.rvog.rvoginv | Solving for forest height and temporal decorrelation magnitude, with fixed extinction.')
     
     
     # Variables for optimization:
@@ -281,12 +289,14 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
     convergedclip = np.ones(gammaclip.shape,dtype='bool')
     threshold = 0.01 # threshold for convergence
     
-    print('kapok.rvog.rvoginv | Performing repeated searches over smaller parameter ranges until hv step size is less than '+str(hv_step)+' m.')
-    print('kapok.rvog.rvoginv | Beginning pass #1 with hv step size: '+str(np.round(hv_vector[1]-hv_vector[0],decimals=3))+' m. ('+time.ctime()+')')
+    if not silent:
+        print('kapok.rvog.rvoginv | Performing repeated searches over smaller parameter ranges until hv step size is less than '+str(hv_step)+' m.')
+        print('kapok.rvog.rvoginv | Beginning pass #1 with hv step size: '+str(np.round(hv_vector[1]-hv_vector[0],decimals=3))+' m. ('+time.ctime()+')')
     
 
     for n, hv_val in enumerate(hv_vector):
-        print('kapok.rvog.rvoginv | Progress: '+str(np.round(n/hv_vector.shape[0]*100,decimals=2))+'%. ('+time.ctime()+')     ', end='\r')
+        if not silent:
+            print('kapok.rvog.rvoginv | Progress: '+str(np.round(n/hv_vector.shape[0]*100,decimals=2))+'%. ('+time.ctime()+')     ', end='\r')
         for ext_val in ext_vector:
             if isinstance(mu, dict):
                 muclip = np.interp(hv_val, mu['x'], mu['y'])
@@ -367,9 +377,11 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
             ext_val = ext_low.copy()
             ext_inc = 1e10
         
-        print('kapok.rvog.rvoginv | Beginning pass #'+str(itnum)+' with hv step size: '+str(np.round(hv_inc,decimals=3))+' m. ('+time.ctime()+')')
+        if not silent:
+            print('kapok.rvog.rvoginv | Beginning pass #'+str(itnum)+' with hv step size: '+str(np.round(hv_inc,decimals=3))+' m. ('+time.ctime()+')')
         while np.all(hv_val < hv_high):
-            print('kapok.rvog.rvoginv | Progress: '+str(np.round((hv_val-hv_low)/(hv_high-hv_low)*100,decimals=2)[0])+'%. ('+time.ctime()+')     ', end='\r')
+            if not silent:
+                print('kapok.rvog.rvoginv | Progress: '+str(np.round((hv_val-hv_low)/(hv_high-hv_low)*100,decimals=2)[0])+'%. ('+time.ctime()+')     ', end='\r')
             
             while np.all(ext_val < ext_high):
                 if isinstance(mu, dict):
@@ -439,7 +451,8 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
     num_total = len(convergedclip)
     rate = np.round(num_converged/num_total*100,decimals=2)
     
-    print('kapok.rvog.rvoginv | Completed.  Convergence Rate: '+str(rate)+'%. ('+time.ctime()+')')
+    if not silent:
+        print('kapok.rvog.rvoginv | Completed.  Convergence Rate: '+str(rate)+'%. ('+time.ctime()+')')
     
     # Rebuild masked arrays into original image size.
     hvmap = np.ones(dim, dtype='float32') * -1

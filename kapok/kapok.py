@@ -37,7 +37,6 @@ import matplotlib.pyplot as plt
 plt.ion()
 
 import kapok.geo
-import kapok.plot
 import kapok.vis
 from kapok.lib import makehermitian, mb_cov_index, mb_tr_index, mb_bl_index, mb_num_baselines
 
@@ -90,6 +89,9 @@ class Scene(object):
             
         if 'products' in self.f:
             self.products = self.f['products']
+            
+        if 'ancillary' in self.f:
+            self.ancillary = self.f['ancillary']
         
         
         # Easy access to some commonly used metadata attributes:
@@ -115,7 +117,7 @@ class Scene(object):
         # Detect old kz format (baseline-indexed) and convert to the new
         # format (track-indexed).
         if not (('indexing' in self.f['kz'].attrs) and (self.f['kz'].attrs['indexing'] == 'track')):
-            print('kapok.Scene | Detected old Kapok file version with kz indexed by baseline.  Do you wish to convert this file to the new format? [y/n]')
+            print('kapok.Scene | Detected old Kapok file version with kz indexed by baseline.  Do you wish to convert this file to the new format?  It is recommended to backup your file before converting.  [y/n]')
             answer = input('')
             answer = answer.lower()
             if (answer == 'y') or (answer == 'yes'):
