@@ -310,7 +310,7 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
                 file2 = slcfiles[slcnum+(seg_end*num_cov_elements)]
                 slc = getslcblock(file, rngsize_slc, azoffset_start, azoffset_end, rngbounds=rngbounds, file2=file2, azsize=azsize_slc[seg_start])
                 
-            slc[np.abs(slc) < 1e-20] = 1e-20 # Don't want zero-valued pixels.
+            slc[np.abs(slc) < 1e-5] = 1e-5 # Don't want zero-valued pixels.  Set floor to -100 dB.
                 
             if slcnum == 0:
                 slcstack = np.zeros((num_cov_elements,slc.shape[0],slc.shape[1]),dtype='complex64')
@@ -742,7 +742,7 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
             (first track in .ann file).
         pol (str): Polarization str of the desired image.  Options are 'hh',
             'hv', or 'vv'.  Default: 'hh'
-        mlwin (tuple): multi-looking window size to use for the quick look
+        mlwin (tuple): Multi-looking window size to use for the quick look
             image.  Note:  The original SLC azimuth indices will be displayed
             on the axes of the image, so that the image can be used as a guide
             for suitable values of the azbounds and rngbounds keywords in

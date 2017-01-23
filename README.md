@@ -25,4 +25,4 @@ See docs/manual.pdf for a user's manual and basic tutorial.  The docs/ folder al
 
 Copyright 2016 California Institute of Technology.  All rights reserved.  United States Government Sponsorship acknowledged.
 
-This software is released under the GNU General Public License.  For details, see the file license.txt included with this program, or visit http://www.gnu.org/licenses/.  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+This software is released under the GNU General Public License.  For details, see the file LICENSE.md included with this program, or visit http://www.gnu.org/licenses/.  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
