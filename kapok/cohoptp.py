@@ -94,14 +94,14 @@ def pdopt(tm, om, numph=30, step=50, reg=0.0, returnall=False):
     
     # Matrix regularization: 
     if reg > 0:
-        regmat = np.zeros(dim, dtype='float32')
+        regmat = np.zeros(dim, dtype='complex64')
         regmat[:,:] = np.eye(dim[2])
-        regmat *= reg*np.trace(tm, axis1=2, axis2=3)
+        regmat = regmat * reg * np.trace(tm, axis1=2, axis2=3)[:,:,np.newaxis,np.newaxis]
         tm = tm + regmat
         
-        regmat = np.zeros(dim, dtype='float32')
+        regmat = np.zeros(dim, dtype='complex64')
         regmat[:,:] = np.eye(dim[2])
-        regmat *= reg*np.trace(om, axis1=2, axis2=3)
+        regmat = regmat * reg * np.trace(om, axis1=2, axis2=3)[:,:,np.newaxis,np.newaxis]
         om = om + regmat
         del regmat
     
@@ -121,8 +121,7 @@ def pdopt(tm, om, numph=30, step=50, reg=0.0, returnall=False):
     weightsize = (dim[0],dim[1],dim[3])
     wmax = np.zeros(weightsize,dtype='complex64')
     wmin = np.zeros(weightsize,dtype='complex64')
-    
-    
+
     # Main Loop
     for Ph in np.arange(0,numph): # loop through rotation angles
         Pr = Ph * np.pi / numph # phase shift to be applied
@@ -207,7 +206,7 @@ def pdopt(tm, om, numph=30, step=50, reg=0.0, returnall=False):
     
     
     print('kapok.cohopt.pdopt | Optimization complete. ('+time.ctime()+')          ')
-    if returnall:                             
+    if returnall:
         return gammamax, gammamin, gammaminormax, gammaminormin, wmax, wmin
     else:
         return gammamax, gammamin

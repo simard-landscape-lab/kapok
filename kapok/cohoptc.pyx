@@ -101,14 +101,14 @@ def pdopt(np.ndarray[np.complex64_t, ndim=4] tm,
     
     # Matrix regularization: 
     if reg > 0:
-        regmat = np.zeros(dim, dtype='float32')
+        regmat = np.zeros(dim, dtype='complex64')
         regmat[:,:] = np.eye(dim[2])
-        regmat *= reg*np.trace(tm, axis1=2, axis2=3)
+        regmat = regmat * reg * np.trace(tm, axis1=2, axis2=3)[:,:,np.newaxis,np.newaxis]
         tm = tm + regmat
         
-        regmat = np.zeros(dim, dtype='float32')
+        regmat = np.zeros(dim, dtype='complex64')
         regmat[:,:] = np.eye(dim[2])
-        regmat *= reg*np.trace(om, axis1=2, axis2=3)
+        regmat = regmat * reg * np.trace(om, axis1=2, axis2=3)[:,:,np.newaxis,np.newaxis]
         om = om + regmat
         del regmat
     
