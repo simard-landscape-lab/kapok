@@ -41,6 +41,7 @@ import kapok.vis
 from kapok.lib import makehermitian, mb_cov_index, mb_tr_index, mb_bl_index, mb_num_baselines
 
 
+
 class Scene(object):
     """Scene object containing a PolInSAR dataset, and methods for viewing
         and processing the data.
@@ -117,7 +118,7 @@ class Scene(object):
         # Detect old kz format (baseline-indexed) and convert to the new
         # format (track-indexed).
         if not (('indexing' in self.f['kz'].attrs) and (self.f['kz'].attrs['indexing'] == 'track')):
-            print('kapok.Scene | Detected old Kapok file version with kz indexed by baseline.  Do you wish to convert this file to the new format?  It is recommended to backup your file before converting.  [y/n]')
+            print('kapok.Scene | Detected old Kapok file version with kz indexed by baseline.  Do you wish to convert this file to the new format? [y/n]')
             answer = input('')
             answer = answer.lower()
             if (answer == 'y') or (answer == 'yes'):
@@ -266,9 +267,10 @@ class Scene(object):
             print('kapok.Scene.query | Desired path does not exist in HDF5 file.')
     
     
-    def inv(self, method='rvog', name=None, desc=None, overwrite=False, bl=0,
-            tdf=None, epsilon=0.4, groundmag=None, ext=None, mu=0,
-            rngslope=None, mask=None, **kwargs):
+    def inv(self, method='rvog', name=None, desc=None, overwrite=False,
+            bl='all', tdf=None, epsilon=0.4, groundmag=None, ext=None, mu=0,
+            rngslope=None, mask=None, blcriteria='prod', minkz=0.0314,
+            **kwargs):
         """Forest model inversion.
         
         Estimate forest height using one of a number of models relating
@@ -319,8 +321,16 @@ class Scene(object):
             overwrite (bool): If a dataset with the requested name already
                 exists, overwrite it.  Default: If the dataset already exists,
                 function will abort with an error message.
-            bl (int): Baseline index specifying which baseline to invert, if
-                scene contains multiple baselines.  Default: 0.
+            bl (int or array or str): Baseline index specifying which
+                baseline(s) to invert.  To do an inversion using multiple
+                baselines, set bl to a list or array of baselines to include.
+                To include all baselines, you can use bl='all'.  Note that the
+                current implementation only supports multi-baseline inversion
+                of the RVoG model in an incoherent manner, through the
+                baseline selection function kapok.rvog.rvogblselect()
+                Multi-baseline inversions using the 'sinc' or 'sincphase'
+                models are not supported.
+                Default: 'all'.
             tdf (array): Array of temporal decorrelation factors to use in
                 the model inversion, if desired.  Default: None.
             epsilon: Value of the epsilon parameter of the sinc and phase
@@ -340,6 +350,20 @@ class Scene(object):
             mask (array): Boolean array of mask values.  Only pixels where
                 (mask == True) will be inverted.  Defaults to array of ones
                 (all pixels inverted).
+            blcriteria (str): Set to 'prod' to use coherence line product
+                as the baseline selection criteria, to 'var' to use
+                expected height variance, or to 'ecc' to use coherence region
+                eccentricity.  See kapok.rvog.rvogblselect() for more details.
+                Note that this keyword is only considered if multi-baseline
+                inversion is enabled by setting the bl keyword to a list of
+                baseline indices, or to the string 'all'.  Default: 'prod'.
+            minkz (float): For a baseline to be inverted, the absolute
+                value of kz must be at least this amount.  This keyword
+                argument allows baselines with zero spatial separation to
+                easily be excluded from multi-baseline inversions.  Note that
+                for single-baseline inversions, the inversion will still
+                proceed, but a warning will be printed.  Default: 0.0314
+                (representing a pi height of ~100m).
             **kwargs: Additional keyword arguments passed to the model
                 inversion functions, if desired.  See model inversion
                 function headers for more details.  Default: None.
@@ -351,6 +375,9 @@ class Scene(object):
         """
         if name is None:
             name = method
+            
+        if isinstance(bl, str) and 'all' in bl:
+            bl = np.arange(self.num_baselines)
         
         if rngslope is True:
             from kapok.lib import calcslope
@@ -370,7 +397,12 @@ class Scene(object):
             result.attrs['desc'] = desc 
         
         # Perform Model Inversion...
-        print('kapok.Scene.inv | Performing model inversion for baseline #'+str(bl)+'.  Average kz: '+str(np.nanmean(self.kz(bl)))+'. ('+time.ctime()+')')
+        if isinstance(bl, (collections.Sequence, np.ndarray)):
+            if 'rvog' not in method:
+                print('kapok.Scene.inv | Multiple baselines selected for inversion, but model is not set to "rvog".  Currently, multi-baseline inversion is only supported for the RVoG model.  Aborting.')
+                return None
+        else:
+            print('kapok.Scene.inv | Performing model inversion for baseline #'+str(bl)+'.  Average kz: '+str(np.nanmean(self.kz(bl)))+'. ('+time.ctime()+')')
         
         # Sinc Model
         if method == 'sinc':
@@ -416,9 +448,9 @@ class Scene(object):
             import kapok.topo
             
             kz = self.kz(bl)
-            
+        
             ambh = (2*np.pi/np.nanmean(np.abs(kz)))
-            if  ambh > 200:
+            if  np.nanmean(np.abs(kz)) < minkz:
                 print('kapok.Scene.inv | Warning: Selected baseline has mean ambiguity height of: '+str(ambh)+' m!  Are you sure you want to invert this baseline?')
 
             # Slope Correct Kz, if Range Slope Specified
@@ -484,11 +516,34 @@ class Scene(object):
             import kapok.rvog
             import kapok.topo
             
-            kz = self.kz(bl)
+            if isinstance(bl, (collections.Sequence, np.ndarray)):
+                bl = np.sort(bl)
+                kz = np.zeros((len(bl),self.dim[0],self.dim[1]),dtype='float32')
+                for m, n in enumerate(bl):
+                    kz[m] = self.kz(n)
+                
+                if 'prod' in blcriteria:
+                    print('kapok.Scene.inv | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using coherence line product. ('+time.ctime()+')')
+                    gamma, kz, blsel = kapok.rvog.rvogblselect(self.pdcoh[bl,:,:,:], kz, method=blcriteria, minkz=minkz)
+                elif 'var' in blcriteria:
+                    print('kapok.Scene.inv | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using height variance. ('+time.ctime()+')')
+                    gamma, kz, blsel = kapok.rvog.rvogblselect(self.pdcoh[bl,:,:,:], kz, method=blcriteria, minkz=minkz)
+                else:
+                    print('kapok.Scene.inv | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using coherence region eccentricity. ('+time.ctime()+')')
+                    gamma, kz, blsel = kapok.rvog.rvogblselect(self.pdcoh[bl,:,:,:], kz, method=blcriteria, gammaminor=self.pdcohminor[bl,:,:,:], minkz=minkz)
+                    
+                # Save which baseline was selected for each pixel.
+                result.create_dataset('bl', data=blsel, dtype='int16', compression=self.compression, compression_opts=self.compression_opts)
+                result['bl'].attrs['fixed'] = False
+                result['bl'].attrs['name'] = 'Chosen Baseline Index'
+                result['bl'].attrs['units'] = ''
+            else:
+                kz = self.kz(bl)
             
-            ambh = (2*np.pi/np.nanmean(np.abs(kz)))
-            if  ambh > 200:
-                print('kapok.Scene.inv | Warning: Selected baseline has mean ambiguity height of: '+str(ambh)+' m!  Are you sure you want to invert this baseline?')
+                ambh = (2*np.pi/np.nanmean(np.abs(kz)))
+                if  np.nanmean(np.abs(kz)) < minkz:
+                    print('kapok.Scene.inv | Warning: Selected baseline has mean ambiguity height of: '+str(ambh)+' m!  Are you sure you want to invert this baseline?')
+                
 
             # Slope Correct Kz, if Range Slope Specified            
             if (rngslope is not None) and (self.kza.attrs['slope_corrected'] == False):
@@ -502,8 +557,13 @@ class Scene(object):
             if 'pdopt/coh' not in self.f:
                 print('kapok.Scene.inv | Run phase diversity coherence optimization before performing RVoG inversion.  Aborting.')
                 result = None
-            else:                
-                if self.num_baselines > 1:
+            else:
+                if isinstance(bl, (collections.Sequence, np.ndarray)):
+                    ground, groundalt, volindex = kapok.topo.groundsolver(gamma, kz=kz, groundmag=groundmag, returnall=True)
+                    coh_high = np.where(volindex,gamma[1],gamma[0])
+                    hv, exttdf, converged = kapok.rvog.rvoginv(coh_high, ground, self.inc, kz, ext=ext, tdf=tdf, mu=mu, rngslope=rngslope,
+                        mask=mask, **kwargs)                
+                elif self.num_baselines > 1:
                     ground, groundalt, volindex = kapok.topo.groundsolver(self.pdcoh[bl], kz=kz, groundmag=groundmag, returnall=True)
                     coh_high = np.where(volindex,self.pdcoh[bl,1],self.pdcoh[bl,0])
                     hv, exttdf, converged = kapok.rvog.rvoginv(coh_high, ground, self.inc, kz, ext=ext, tdf=tdf, mu=mu, rngslope=rngslope,
@@ -519,6 +579,10 @@ class Scene(object):
     
                 result.attrs['model'] = 'rvog'
                 result.attrs['baseline'] = bl
+                if isinstance(bl, (collections.Sequence, np.ndarray)):
+                    result.attrs['baseline_selection'] = blcriteria
+                else:
+                    result.attrs['baseline_selection'] = 'Single Baseline'
                 result.create_dataset('hv', data=hv, dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
                 result['hv'].attrs['fixed'] = False
                 result['hv'].attrs['name'] = 'Forest Height'
@@ -558,6 +622,7 @@ class Scene(object):
                     result['tdf'].attrs['units'] = ''
                 else:
                     result.attrs['tdf'] = tdf
+                
 
         
         else:
@@ -581,7 +646,7 @@ class Scene(object):
         return result['hv']
     
        
-    def opt(self, method='pdopt', reg=0.0, saveall=False, overwrite=False,
+    def opt(self, method='pdopt', reg=0.0, saveall=True, overwrite=False,
             **kwargs):
         """Coherence optimization.
         
@@ -602,7 +667,7 @@ class Scene(object):
             saveall (bool): True/False flag, specifies whether to
                 save the polarization weight vectors for the optimized
                 coherences in 'pdopt/weights', and the minor axis coherences
-                in 'pdopt/cohminor'.
+                in 'pdopt/cohminor'.  Default: True.
             overwrite (bool): True/False flag that determines whether to
                 overwrite the current coherences.  If False, will abort if
                 the coherences already exist.
@@ -781,7 +846,7 @@ class Scene(object):
                 functions.  Only works if imagetype is input data array.  The
                 string image types generally have preset options.
             
-        """
+        """           
         if bounds is not None:
             if len(bounds) == 2:
                 extent = (0,self.dim[1],bounds[1],bounds[0])
@@ -1071,9 +1136,9 @@ class Scene(object):
             import kapok.topo
             if bounds is None:
                 if self.num_baselines > 1:                
-                    ground = kapok.topo.groundsolver(self.pdcoh[bl], kz=self.kz(bl), **kwargs)
+                    ground = kapok.topo.groundsolver(self.pdcoh[bl], kz=self.kz(bl), silent=True, **kwargs)
                 else:
-                    ground = kapok.topo.groundsolver(self.pdcoh[:], kz=self.kz(bl), **kwargs)
+                    ground = kapok.topo.groundsolver(self.pdcoh[:], kz=self.kz(bl), silent=True, **kwargs)
             else:
                 if self.num_baselines > 1:
                     pdcoh = self.pdcoh[bl,:,bounds[0]:bounds[1],bounds[2]:bounds[3]]
@@ -1081,7 +1146,7 @@ class Scene(object):
                     pdcoh = self.pdcoh[:,bounds[0]:bounds[1],bounds[2]:bounds[3]]
 
                 kz = self.kz(bl)[bounds[0]:bounds[1],bounds[2]:bounds[3]]                    
-                ground = kapok.topo.groundsolver(pdcoh, kz=kz, **kwargs)
+                ground = kapok.topo.groundsolver(pdcoh, kz=kz, silent=True, **kwargs)
                 return ground
             
             if pix is not None:
@@ -1269,7 +1334,8 @@ class Scene(object):
         return
 
 
-    def geo(self, data, outfile, outformat='ENVI', resampling='bilinear'):
+    def geo(self, data, outfile, outformat='ENVI', resampling='bilinear',
+            nodataval=None, tr=None):
         """Output a geocoded raster.
         
             Resampling from radar coordinates to latitude/longitude using
@@ -1291,6 +1357,13 @@ class Scene(object):
                     Options include 'near', 'bilinear', 'cubic', 'lanczos',
                     and others.  Default is 'bilinear'.  For reference and
                     more options, see http://www.gdal.org/gdalwarp.html.
+                nodataval:  No data value for the output raster.  This will be the
+                    value of the raster for all pixels outside the input data
+                    extent.  Default: None.
+                tr (float): Set output file resolution (in degrees).  Can be set
+                    to a tuple to set (longitude, latitude) resolution separately.
+                    Default: None (GDAL will decide output file resolution based on
+                    input).
             
         """        
         if isinstance(data, str):
@@ -1298,7 +1371,9 @@ class Scene(object):
         
         outpath, outfile = os.path.split(outfile)
         
-        kapok.geo.radar2ll(outpath, outfile, data, self.lat[:], self.lon[:], outformat=outformat, resampling=resampling)
+        kapok.geo.radar2ll(outpath, outfile, data, self.lat[:], self.lon[:],
+                           outformat=outformat, resampling=resampling,
+                           nodataval=nodataval, tr=tr)
         
         return
 
