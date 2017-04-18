@@ -2,7 +2,8 @@
 """Topography Estimation Module
 
     Estimating ground coherence and ground topographic phase using line
-    fitting of the observed PolInSAR coherences.  For reference, see:
+    fitting of the observed PolInSAR coherences.  For reference, see the
+    paper:
     
     S. R. Cloude and K. P. Papathanassiou, "Three-stage inversion process
     for polarimetric SAR interferometry," IEE Proceedings - Radar, Sonar

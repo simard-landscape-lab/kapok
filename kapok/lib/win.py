@@ -91,6 +91,28 @@ def smooth(data, smwin, **kwargs):
         return scipy.ndimage.uniform_filter(data, smwin, **kwargs)
         
         
+def gaussiansmooth(data, std, truncate=3.0):
+    """Smoothing with a 2D Gaussian filter. Uses
+        scipy.ndimage.filters.gaussian_filter.  Non-finite values anywhere
+        in the smoothing window will result in that pixel in the filtered
+        result also containing a nan value.
+    
+    Arguments:
+        data: Array containing data to smooth.
+        std (float): Standard deviation of the Gaussian filter, in pixel
+            units.
+        truncate (float): The number of standard deviations at which to
+            truncate the filter.  Default: 3.0
+        
+    Returns:
+        filtdata: Array containing Gaussian filtered data.
+    
+    """    
+    filtdata = scipy.ndimage.filters.gaussian_filter(data, std, truncate=truncate)
+    
+    return filtdata
+        
+        
 def nanmlook(data, mlwin):
     """Multilook/rebin image to smaller image by averaging.  Ignores nan values
     in input data.
@@ -181,4 +203,37 @@ def nansmooth(data, smwin, **kwargs):
         res[num_valid > 0] *= winsize / num_valid[num_valid > 0]
         res[num_valid <= 0] = np.nan
         return res
+
+
+def nangaussiansmooth(data, std, truncate=3.0):
+    """Smoothing with a 2D Gaussian filter. Uses
+        scipy.ndimage.filters.gaussian_filter.  Ignores non-finite values in
+        input data.  Note that if the window contains no finite values, the
+        smoothed data will also contain a nan value for that element.
+    
+    Arguments:
+        data: Array containing data to smooth.
+        std (float): Standard deviation of the Gaussian filter, in pixel
+            units.
+        truncate (float): The number of standard deviations at which to
+            truncate the filter.  Default: 3.0
         
+    Returns:
+        filtdata: Array containing Gaussian filtered data.
+    
+    """
+    # Replace nan-values with zeros.
+    datamasked = data.copy()
+    datamasked[~np.isfinite(data)] = 0
+    
+    weights = np.ones(data.shape,dtype='float32')
+    weights[~np.isfinite(data)] = 0
+    
+    datamasked = scipy.ndimage.filters.gaussian_filter(datamasked, std, truncate=truncate)
+    weights = scipy.ndimage.filters.gaussian_filter(weights, std, truncate=truncate)   
+    weights[np.isclose(weights,0)] == -1
+    
+    filtdata = datamasked / weights
+    filtdata[weights < 0] = np.nan
+    
+    return filtdata

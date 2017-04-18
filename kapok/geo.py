@@ -35,7 +35,7 @@ from kapok.lib import bilinear_interpolate
 
 
 def radar2ll(outpath, datafile, data, lat, lon, outformat='ENVI',
-             resampling='bilinear'):
+             resampling='bilinear', nodataval=None, tr=None):
     """Create a geocoded file, in geographic projection, from input data
     in azimuth, slant range radar coordinates.
     
@@ -65,6 +65,13 @@ def radar2ll(outpath, datafile, data, lat, lon, outformat='ENVI',
             include 'near', 'bilinear', 'cubic', 'lanczos', and others.
             Default is 'bilinear'.  For reference and more options, see
             http://www.gdal.org/gdalwarp.html.
+        nodataval:  No data value for the output raster.  This will be the
+            value of the raster for all pixels outside the input data
+            extent.  Default: None.
+        tr (float): Set output file resolution (in degrees).  Can be set
+            to a tuple to set (longitude, latitude) resolution separately.
+            Default: None (GDAL will decide output file resolution based on
+            input).
     
     """   
     if sys.byteorder == 'little':
@@ -139,7 +146,21 @@ def radar2ll(outpath, datafile, data, lat, lon, outformat='ENVI',
         
         
     # Call gdalwarp:
-    command = 'gdalwarp -overwrite -geoloc -t_srs EPSG:4326 -ot Float32 -r '+resampling+' -of '+outformat+' '+outpath+'tempdata.vrt '+outpath+datafile
+    command = 'gdalwarp -overwrite -geoloc -t_srs EPSG:4326 -ot Float32 -r ' + resampling + ' -of ' + outformat
+
+    if nodataval is not None:
+        command = command + ' -dstnodata '+str(nodataval)
+
+    if tr is not None:
+        if isinstance(tr, tuple):
+            command = command + ' -tr '+str(tr[0])+' '+str(tr[1])
+        else:
+            command = command + ' -tr '+str(tr)+' '+str(tr)
+        
+    
+    command = command + ' ' + outpath + 'tempdata.vrt ' + outpath + datafile
+    
+    
     print(command)
     print(subprocess.getoutput(command))
     
@@ -151,7 +172,6 @@ def radar2ll(outpath, datafile, data, lat, lon, outformat='ENVI',
     os.remove(outpath+'templon.vrt')
     os.remove(outpath+'tempdata.dat')
     os.remove(outpath+'tempdata.vrt')
-    
     
     return
     

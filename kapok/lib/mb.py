@@ -84,8 +84,8 @@ def mb_bl_index(tr1, tr2):
 
 
 def mb_cov_index(bl, pol=0, pol2=None, n_pol=3):
-    """Returns row,col covariance matrix indices for given baseline and pol
-        index.
+    """Returns row,col covariance matrix indices for given baseline and
+        polarization index.
 
         If polb is not given, then same polarization is assumed (e.g. HH-HH,
         vs. HH-VV).
