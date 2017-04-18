@@ -40,70 +40,64 @@ def rvogfwdvol(hv, ext, inc, kz, rngslope=0.0):
     
     For a given set of model parameters, calculate the RVoG model coherence.
     
+    Note that all input arguments must be arrays (even if they are one element
+    arrays), so that they can be indexed to check for nan or infinite values
+    (due to extreme extinction or forest height values).  All input arguments
+    must have the same shape.
+    
     Arguments:
-        hv: Height of the forest volume, in meters.
-        ext: Wave extinction within the forest volume, in Np/m.
-        inc: Incidence angle, in radians.
-        kz: Interferometric vertical wavenumber, in radians/meter.
-        rngslope: Range-facing terrain slope angle, in radians.  If not
+        hv (array): Height of the forest volume, in meters.
+        ext (array): Wave extinction within the forest volume, in Np/m.
+        inc (array): Incidence angle, in radians.
+        kz (array): Interferometric vertical wavenumber, in radians/meter.
+        rngslope (array): Range-facing terrain slope angle, in radians.  If not
             specified, flat terrain is assumed.
             
     Returns:
         gamma: Modelled complex coherence.
 
     """
-    # Check if scalar or array extinction.
-    if isinstance(ext, (collections.Sequence, np.ndarray)):
-        extscalar = False
-    else:
-        extscalar = True
-        
-    # Check for Zero Extinction And Limit to Lower Bound of 1e-10 Np/m
-    if extscalar and (ext <= 1e-10):
-        ext = 1e-10
-    elif not extscalar:
-        ind = (ext <= 1e-10)
-        if np.any(ind):
-            ext[ind] = 1e-10
-    
-    
-    # Calculate volume coherence.
-    p1 = 2*ext*np.cos(rngslope)/np.cos(inc-rngslope)
+    # Calculate the propagation coefficients.
+    p1 = 2*ext*np.cos(rngslope)/np.cos(inc-rngslope)    
     p2 = p1 + 1j*kz
     
-    with np.errstate(divide='ignore',invalid='ignore'):
-        gammav = (p1 / p2) * (np.exp(p2*hv)-1) / (np.exp(p1*hv)-1)
+    # Check for zero or close to zero hv (or kz) values (e.g., negligible
+    # volume decorrelation).
+    gammav = kz*hv
+    ind_novolume = np.isclose(np.abs(gammav), 0)
+       
+    # Check for zero or close to zero extinction values (e.g., uniform
+    # vertical structure function).
+    gammav = p2 * (np.exp(p1*hv) - 1)
+    ind_zeroext = np.isclose(np.abs(gammav), 0) & ~ind_novolume
     
+    # Check for infinite numerator of the volume coherence equation (e.g.,
+    # extremely high extinction value).
+    gammav = p1 * (np.exp(p2*hv) - 1)
+    ind_nonfinite = ~np.isfinite(gammav) & ~ind_novolume & ~ind_zeroext
     
-    # Check if scalar or array hv.
-    if isinstance(hv, (collections.Sequence, np.ndarray)):
-        hvscalar = False
-    else:
-        hvscalar = True
+    # The remaining indices are where the standard equation should be valid:
+    ind = ~ind_zeroext & ~ind_novolume & ~ind_nonfinite
+    
+    if np.any(ind_novolume):
+        gammav[ind_novolume] = 1
         
-    # Check for Zero Forest Height
-    if hvscalar and (hv <= 0):
-        gammav[:] = 1.0
-    elif not hvscalar:
-        ind = (hv <= 0)
-        if np.any(ind):
-            gammav[ind] = 1.0
-                
-    # Check for Non-Finite Volume Coherence (indicates very large p1--extinction essentially infinite)    
-    ind = ~np.isfinite(gammav)
+    if np.any(ind_zeroext):
+        gammav[ind_zeroext] = ((np.exp(1j*kz*hv) - 1) / (1j*kz*hv))[ind_zeroext]
+        
+    if np.any(ind_nonfinite):
+        gammav[ind_nonfinite] = np.exp(1j*hv*kz)[ind_nonfinite]
+    
     if np.any(ind):
-        if hvscalar:
-            gammav[ind] = np.exp(1j*hv*kz[ind])
-        else:
-            gammav[ind] = np.exp(1j*hv[ind]*kz[ind])
-            
+        gammav[ind] = ((p1 / p2) * (np.exp(p2*hv)-1) / (np.exp(p1*hv)-1))[ind]
+    
+    
+    return gammav    
 
-    return gammav
-    
-    
-def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
-            mask=None, limit2pi=True, hv_min=0, hv_max=50, hv_step=0.01,
-            ext_min=0.0115, ext_max=0.115, silent=False):
+
+def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0.0, rngslope=0.0,
+            mask=None, limit2pi=True, hv_min=0.0, hv_max=60.0, hv_step=0.01,
+            ext_min=0.0, ext_max=0.115, silent=False):
     """RVoG model inversion.
     
         Calculate the RVoG model parameters which produce a modelled coherence
@@ -156,7 +150,7 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
                 the values of tdf and hv.  If both ext and tdf are left empty,
                 function will fix tdf to 1.  Default: None.
             mu: Fixed values for the ground-to-volume scattering ratio of
-                gamma.  Default: 0.
+                the gamma input argument.  Default: 0.
             rngslope (array): Terrain slope angle in the ground range
                 direction, in radians.  Default: 0 (flat terrain).
             mask (array): Boolean array.  Pixels where (mask == True) will be
@@ -173,7 +167,7 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
                 progressively smaller step sizes, until the step size
                 reaches a value below hv_step.  Default: 0.01 m.
             ext_min (float): Minimum extinction value, in Np/m.
-                Default: 0.0115 Np/m (~0.1 dB/m).
+                Default: 0.00115 Np/m (~0.01 dB/m).
             ext_max (float): Maximum extinction value, in Np/m.
                 Default: 0.115 Np/m (~1 dB/m).
             silent (bool): Set to True to suppress status updates.  Default:
@@ -217,19 +211,19 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
         hv_min_clip = None
     
     
-    hv_samples = int((hv_max-hv_min+1)*3) # Initial Number of hv Bins in Search Grid
+    hv_samples = int((hv_max-hv_min)*2 + 1) # Initial Number of hv Bins in Search Grid
     hv_vector = np.linspace(hv_min, hv_max, num=hv_samples)
     
     
     if tdf is not None:
-        ext_samples = 60
+        ext_samples = 40
         ext_vector = np.linspace(ext_min, ext_max, num=ext_samples)
     elif ext is None:
         tdf = 1.0
-        ext_samples = 60
+        ext_samples = 40
         ext_vector = np.linspace(ext_min, ext_max, num=ext_samples)
     else:
-        ext_vector = [-1]
+        ext_vector = [-1.0]
  
         
     # Use mask to clip input data.
@@ -368,14 +362,16 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
                
         if ext is None:
             ext_low = extfit - ext_inc
+            ext_low[ext_low < ext_min] = ext_min
             ext_high = extfit + ext_inc
+            ext_high[ext_high > ext_max] = ext_max
             ext_val = ext_low.copy()
             ext_inc /= 10
         else:
-            ext_low = np.array(ext_min)
-            ext_high = np.array(ext_max)
+            ext_low = np.array(ext_min,dtype='float32')
+            ext_high = np.array(ext_max,dtype='float32')
             ext_val = ext_low.copy()
-            ext_inc = 1e10
+            ext_inc = 10.0
         
         if not silent:
             print('kapok.rvog.rvoginv | Beginning pass #'+str(itnum)+' with hv step size: '+str(np.round(hv_inc,decimals=3))+' m. ('+time.ctime()+')')
@@ -436,7 +432,7 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
                         tdffit[ind] = tdf_val[ind]
                 
                 
-                # Increment the extinction:        
+                # Increment the extinction:
                 ext_val += ext_inc
 
             # Increment the forest height:                
@@ -469,3 +465,110 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0, rngslope=0.0,
         tdfmap = np.ones(dim, dtype='float32') * -1
         tdfmap[mask] = tdffit
         return hvmap, tdfmap, converged
+        
+        
+def rvogblselect(gamma, kz, method='prod', minkz=0.0314, gammaminor=None):
+    """From a multi-baseline dataset, select the baseline for each pixel that
+        we expect to produce the best forest height estimate using the RVoG
+        model.
+        
+        There are multiple different methods implemented here for ranking
+        the baselines.  These are chosen using the method keyword argument.
+        The default is method='prod', which selects the baseline with the
+        highest product between the coherence region major axis line length
+        and the line between the coherence region center and the origin of
+        the complex plane.  Essentially, this method prefers baselines which
+        have both a long coherence region (e.g., a large phase separation
+        between the high and low coherences) as well as a high overall
+        coherence magnitude.
+        
+        The second method is 'ecc', which selects the baseline with the
+        highest coherence region eccentricity, favoring baselines
+        with coherence regions that have a large axial ratio (major axis
+        divided by minor axis).
+        
+        The last option is method='var', which favours the baseline with
+        the smallest expected height variance, which is calculated using
+        the Cramer-Rao Lower Bound for the phase variance.  For details on
+        these last two selection criteria, see the paper:
+        
+        S. K. Lee, F. Kugler, K. P. Papathanassiou, I. Hajnsek,
+        "Multibaseline polarimetric SAR interferometry forest height
+        inversion approaches", POLinSAR ESA-ESRIN, 2011-Jan. 
+        
+        Arguments:
+            gamma (array): Array of coherence values for the
+                multi-baseline dataset.  Should have dimensions
+                (bl, coh, azimuth, range).  bl is the baseline index, and coh
+                is the coherence index (e.g., the high and low optimized
+                coherences).  Note that if you are using the eccentricity
+                selection method, gamma needs to contain the high and low
+                coherences, as the shape of the coherence region is used
+                in the selection process.  If you are using the height
+                variance selection method, however, the input coherences
+                can be any coherences you wish to use.  The mean coherence
+                magnitude of the input coherences for each pixel will be
+                used to calculate the height variance.
+            kz (array): Array of kz values for the multi-baseline dataset.
+                Should have shape (baseline, azimuth, range).
+            gammaminor (array): If using the eccentricity selection method,
+                this keyword argument needs to be given an array with the
+                same shape as gamma, containing the two coherences along the
+                minor axis of the coherence region (e.g., the optimized
+                coherences with the smallest separation).  These can be
+                calculated and saved by calling kapok.Scene.opt(saveall=True).
+                See the documentation for kapok.Scene.opt for more details.
+                Default: None.
+            method (str): String which determines the method to use for
+                selecting the baselines.  Options are 'ecc'
+                (for eccentricity),  'var' (for height variance), or
+                'prod' (for product of coherence region major axis and
+                coherence magnitude).  See main function description above
+                for more details.  Default: 'prod'.
+            minkz (float): For a baseline to be considered, the absolute
+                value of kz must be at least this amount.  This keyword
+                argument allows baselines with zero spatial separation to be
+                excluded.  Default: 0.0314 (e.g., if pi height is greater
+                than 100m, that baseline will be excluded).
+        
+        Returns:
+            gammasel (array): Array of coherences, for the selected
+                baselines only.  Has shape (2, azimuth, range).
+            kzsel (array): The kz values of the selected baselines for each
+                pixel.  Has shape (azimuth, range).
+            blsel (array): For each pixel, an array containing the baseline index
+                of the baseline that was chosen.
+    
+    """
+    if 'prod' in method: # Line Product Method
+        criteria = np.abs(gamma[:,0] - gamma[:,1]) * np.abs(0.5*(gamma[:,0] + 
+            gamma[:,1]))
+        criteria[np.abs(kz) < minkz] = -1e6
+    elif 'var' in method: # Height Variance Method
+        # Note: We don't include the number of looks in the equation, as we
+        # assume the coherence for all of the baselines have been estimated
+        # using the same number of looks, so it does not affect the
+        # selection.
+        criteria = (np.nanmean(np.abs(gamma),axis=1)) ** 2
+        criteria = -1*np.sqrt((1-criteria)/2*criteria)/np.abs(kz)
+        criteria[np.abs(kz) < minkz] = -1e6
+    else: # Eccentricity Method
+        if gammaminor is not None:
+            criteria = (np.abs(gammaminor[:,0] - gammaminor[:,1])/np.abs(gamma[:,0] - gamma[:,1])) ** 2
+            criteria = np.sqrt(1 - (criteria))
+            criteria[np.abs(kz) < minkz] = -1e6
+        else:
+            print('kapok.rvog.rvogblselect | Using eccentricity method for baseline selection, but gammaminor keyword has not been set.  Aborting.')
+            return None
+    
+    # Now shuffle the coherences and kz values around to return the baselines
+    # with the highest criteria value for each pixel.
+    blsel = np.argmax(criteria, axis=0)
+    az = np.tile(np.arange(gamma.shape[2]),(gamma.shape[3],1)).T
+    rng = np.tile(np.arange(gamma.shape[3]),(gamma.shape[2],1))
+       
+    gammasel = gamma[blsel,:,az,rng]
+    gammasel = np.rollaxis(gammasel, 2)
+    kzsel = kz[blsel,az,rng]
+    
+    return gammasel, kzsel, blsel

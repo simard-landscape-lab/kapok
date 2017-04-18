@@ -37,7 +37,7 @@ import numpy as np
 
 try: # Import Cython Implementation
     import pyximport; pyximport.install(setup_args={"include_dirs":np.get_include()})
-    from .rvogc import rvoginv, rvogfwdvol
+    from .rvogc import rvoginv, rvogfwdvol, rvogblselect
 except ImportError: # Cython Import Failed
     print('kapok.rvog | WARNING: Cython import failed.  Using native Python (will be slow).')
-    from .rvogp import rvoginv, rvogfwdvol
+    from .rvogp import rvoginv, rvogfwdvol, rvogblselect
