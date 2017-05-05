@@ -508,6 +508,7 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
             for seg in range(num_segments):
                 if not kzcalc:
                     file = glob(datapath+tracknames[tr]+'*s'+str(seg+1)+'*.kz')
+                    file_alt = glob(datapath+tracknames[tr]+'*.kz')
                     
                     if len(file) >= 1:
                         kz_rows = int(ann.query('lkv_'+str(seg+1)+'_2x8 Rows'))
@@ -516,6 +517,13 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
                             kz_temp = np.memmap(file[0], dtype='float32', mode='r', shape=(kz_rows, kz_cols))
                         else:
                             kz_temp = np.vstack((kz_temp, np.memmap(file[0], dtype='float32', mode='r', shape=(kz_rows, kz_cols))))
+                    elif (num_segments == 1) and (len(file_alt) >= 1):
+                        kz_rows = int(ann.query('lkv_'+str(seg+1)+'_2x8 Rows'))
+                        kz_cols = int(ann.query('lkv_'+str(seg+1)+'_2x8 Columns'))
+                        if kz_temp is None:
+                            kz_temp = np.memmap(file_alt[0], dtype='float32', mode='r', shape=(kz_rows, kz_cols))
+                        else:
+                            kz_temp = np.vstack((kz_temp, np.memmap(file_alt[0], dtype='float32', mode='r', shape=(kz_rows, kz_cols))))
                     else:
                         print('kapok.uavsar.load | Cannot find .kz file matching pattern: "'+datapath+tracknames[tr]+'*s'+str(seg+1)+'*.kz".  Attempting to calculate kz from .baseline files.')
                         kzcalc = True
