@@ -464,9 +464,9 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0.0, rngslope=0.0,
     else:
         tdfmap = np.ones(dim, dtype='float32') * -1
         tdfmap[mask] = tdffit
-        return hvmap, tdfmap, converged
-        
-        
+        return hvmap, tdfmap, converged        
+
+
 def rvogblselect(gamma, kz, method='prod', minkz=0.0314, gammaminor=None):
     """From a multi-baseline dataset, select the baseline for each pixel that
         we expect to produce the best forest height estimate using the RVoG
@@ -480,7 +480,7 @@ def rvogblselect(gamma, kz, method='prod', minkz=0.0314, gammaminor=None):
         the complex plane.  Essentially, this method prefers baselines which
         have both a long coherence region (e.g., a large phase separation
         between the high and low coherences) as well as a high overall
-        coherence magnitude.
+        coherence magnitude.  This criteria was suggested by Marco Lavalle.
         
         The second method is 'ecc', which selects the baseline with the
         highest coherence region eccentricity, favoring baselines
@@ -541,25 +541,31 @@ def rvogblselect(gamma, kz, method='prod', minkz=0.0314, gammaminor=None):
     
     """
     if 'prod' in method: # Line Product Method
-        criteria = np.abs(gamma[:,0] - gamma[:,1]) * np.abs(0.5*(gamma[:,0] + 
-            gamma[:,1]))
-        criteria[np.abs(kz) < minkz] = -1e6
+        from kapok.lib import linesegmentdist
+        print('kapok.rvog.rvogblselect | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using coherence line product. ('+time.ctime()+')')
+        sep = np.abs(gamma[:,0] - gamma[:,1])
+        dist = linesegmentdist(0, gamma[:,0], gamma[:,1], full_line=True)
+        criteria = sep * dist
     elif 'var' in method: # Height Variance Method
         # Note: We don't include the number of looks in the equation, as we
         # assume the coherence for all of the baselines have been estimated
         # using the same number of looks, so it does not affect the
         # selection.
-        criteria = (np.nanmean(np.abs(gamma),axis=1)) ** 2
-        criteria = -1*np.sqrt((1-criteria)/2*criteria)/np.abs(kz)
-        criteria[np.abs(kz) < minkz] = -1e6
+        print('kapok.rvog.rvogblselect | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using height variance. ('+time.ctime()+')')
+        criteria = np.abs(gamma[:,0]) ** 2
+        criteria = -1*np.sqrt((1-criteria)/2/criteria)/np.abs(kz)
     else: # Eccentricity Method
         if gammaminor is not None:
+            print('kapok.rvog.rvogblselect | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using coherence region eccentricity. ('+time.ctime()+')')
             criteria = (np.abs(gammaminor[:,0] - gammaminor[:,1])/np.abs(gamma[:,0] - gamma[:,1])) ** 2
-            criteria = np.sqrt(1 - (criteria))
-            criteria[np.abs(kz) < minkz] = -1e6
+            criteria = np.sqrt(1 - criteria)
         else:
             print('kapok.rvog.rvogblselect | Using eccentricity method for baseline selection, but gammaminor keyword has not been set.  Aborting.')
             return None
+    
+    
+    # Remove too small baselines.
+    criteria[np.abs(kz) < minkz] = -1e6
     
     # Now shuffle the coherences and kz values around to return the baselines
     # with the highest criteria value for each pixel.

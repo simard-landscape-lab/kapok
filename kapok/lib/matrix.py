@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Covariance matrix manipulation functions.
+"""Matrix and linear algebra helper functions.
 
     Author: Michael Denbina
     
@@ -176,3 +176,37 @@ def rotateT3(m, psi):
     
     mr = np.rollaxis(np.rollaxis(mr,-1),-1)
     return mr
+    
+    
+def linesegmentdist(p, w, v, full_line=False):
+    """Function to calculate the shortest line segment between a complex
+    coherence and a line segment in the complex plane.
+    
+    Arguments:
+        p: The coherence point (e.g., the modelled volume coherence, or
+            the origin).
+        w: One end of the line segment (e.g., exp(1j*phialt)).
+        v: The other point on the line segment (e.g., the observed high
+            coherence).
+        full_line (bool): Set to True if you do not want to check just the
+            line segment, but rather the entire line through w and v, for
+            the solution.  Default: False (constrain the projected point
+            to lie between w and v).
+    
+    Returns:
+        line:  The shortest line length.  We take the distance of this to
+            calculate the cost for the coherences.
+    
+    """
+    l2 = np.square(np.abs(w - v)) # Squared length of line segment.
+    
+    if np.all(l2 == 0): # Check if line segment has zero length.
+        return np.abs(p - v)
+    else:
+        # Consider line segment parameterized as v + t(w - v).  Project
+        # p onto this line, but clip t bounded to [0,1].
+        t = (np.real(p-v)*np.real(w-v) + np.imag(p-v)*np.imag(w-v)) / l2
+        if not full_line:
+            t = np.clip(t, 0, 1)    
+        proj = v + t*(w-v)
+        return (p - proj)

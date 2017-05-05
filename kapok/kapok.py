@@ -328,9 +328,8 @@ class Scene(object):
                 current implementation only supports multi-baseline inversion
                 of the RVoG model in an incoherent manner, through the
                 baseline selection function kapok.rvog.rvogblselect()
-                Multi-baseline inversions using the 'sinc' or 'sincphase'
-                models are not supported.
-                Default: 'all'.
+                Multi-baseline inversion using the 'sinc' or 'sincphase'
+                models is not supported.  Default: 'all'.
             tdf (array): Array of temporal decorrelation factors to use in
                 the model inversion, if desired.  Default: None.
             epsilon: Value of the epsilon parameter of the sinc and phase
@@ -521,19 +520,14 @@ class Scene(object):
                 kz = np.zeros((len(bl),self.dim[0],self.dim[1]),dtype='float32')
                 for m, n in enumerate(bl):
                     kz[m] = self.kz(n)
-                
-                if 'prod' in blcriteria:
-                    print('kapok.Scene.inv | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using coherence line product. ('+time.ctime()+')')
-                    gamma, kz, blsel = kapok.rvog.rvogblselect(self.pdcoh[bl,:,:,:], kz, method=blcriteria, minkz=minkz)
-                elif 'var' in blcriteria:
-                    print('kapok.Scene.inv | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using height variance. ('+time.ctime()+')')
-                    gamma, kz, blsel = kapok.rvog.rvogblselect(self.pdcoh[bl,:,:,:], kz, method=blcriteria, minkz=minkz)
-                else:
-                    print('kapok.Scene.inv | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using coherence region eccentricity. ('+time.ctime()+')')
+                    
+                if 'ecc' in blcriteria:
                     gamma, kz, blsel = kapok.rvog.rvogblselect(self.pdcoh[bl,:,:,:], kz, method=blcriteria, gammaminor=self.pdcohminor[bl,:,:,:], minkz=minkz)
+                else:
+                    gamma, kz, blsel = kapok.rvog.rvogblselect(self.pdcoh[bl,:,:,:], kz, method=blcriteria, minkz=minkz)
                     
                 # Save which baseline was selected for each pixel.
-                result.create_dataset('bl', data=blsel, dtype='int16', compression=self.compression, compression_opts=self.compression_opts)
+                result.create_dataset('bl', data=bl[blsel], dtype='int16', compression=self.compression, compression_opts=self.compression_opts)
                 result['bl'].attrs['fixed'] = False
                 result['bl'].attrs['name'] = 'Chosen Baseline Index'
                 result['bl'].attrs['units'] = ''
@@ -1622,4 +1616,3 @@ class Scene(object):
         f.close()
         print('kapok.Scene.subset | Complete. ('+time.ctime()+')')
         return kapok.Scene(outfile)
-        
