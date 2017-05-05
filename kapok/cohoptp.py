@@ -45,7 +45,7 @@ def pdopt(tm, om, numph=30, step=50, reg=0.0, returnall=False):
     
     Arguments:
         tm (array): The polarimetric covariance (T) matrix of the data,
-            with dimensions: [num_pol, num_pol].  Note that in the
+            with dimensions: [az, rng, num_pol, num_pol].  Note that in the
             HDF5 file, covariance matrix elements below the diagonal are
             zero-valued, in order to save disk space.  The (j,i) elements
             should therefore calculated from the complex conjugate of the
