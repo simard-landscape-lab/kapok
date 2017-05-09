@@ -179,14 +179,15 @@ def rotateT3(m, psi):
     
     
 def linesegmentdist(p, w, v, full_line=False):
-    """Function to calculate the shortest line segment between a complex
+    """Function to calculate the shortest line length between a complex
     coherence and a line segment in the complex plane.
     
     Arguments:
         p: The coherence point (e.g., the modelled volume coherence, or
             the origin).
-        w: One end of the line segment (e.g., exp(1j*phialt)).
-        v: The other point on the line segment (e.g., the observed high
+        w: One end of the line segment (e.g., the observed high
+            coherence).
+        v: The other point on the line segment (e.g., the observed low
             coherence).
         full_line (bool): Set to True if you do not want to check just the
             line segment, but rather the entire line through w and v, for
@@ -209,4 +210,4 @@ def linesegmentdist(p, w, v, full_line=False):
         if not full_line:
             t = np.clip(t, 0, 1)    
         proj = v + t*(w-v)
-        return (p - proj)
+        return np.abs(p - proj)

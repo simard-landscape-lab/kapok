@@ -471,11 +471,18 @@ def rvogblselect(gamma, kz, method='prod', minkz=0.0314, gammaminor=None):
         the baselines.  These are chosen using the method keyword argument.
         The default is method='prod', which selects the baseline with the
         highest product between the coherence region major axis line length
-        and the line between the coherence region center and the origin of
-        the complex plane.  Essentially, this method prefers baselines which
+        and the magnitude of the complex average of the high and low
+        coherences.  Essentially, this method prefers baselines which
         have both a long coherence region (e.g., a large phase separation
         between the high and low coherences) as well as a high overall
-        coherence magnitude.  This criteria was suggested by Marco Lavalle.
+        coherence magnitude.
+        
+        The second method is 'line', which takes the product between
+        the coherence region major axis separation times the minimum distance
+        between the origin of the complex plane and the line segment fitted
+        to the optimized coherences.  This is fairly similar to the previous
+        method, but will produce different results in some cases.  This
+        criteria and the previous option were suggested by Marco Lavalle.
         
         The second method is 'ecc', which selects the baseline with the
         highest coherence region eccentricity, favoring baselines
@@ -535,11 +542,11 @@ def rvogblselect(gamma, kz, method='prod', minkz=0.0314, gammaminor=None):
                 of the baseline that was chosen.
     
     """
-    if 'prod' in method: # Line Product Method
+    if 'line' in method: # Line Length * Separation Product Method
         from kapok.lib import linesegmentdist
-        print('kapok.rvog.rvogblselect | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using coherence line product. ('+time.ctime()+')')
+        print('kapok.rvog.rvogblselect | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using product of fitted line distance from origin and coherence separation. ('+time.ctime()+')')
         sep = np.abs(gamma[:,0] - gamma[:,1])
-        dist = linesegmentdist(0, gamma[:,0], gamma[:,1], full_line=True)
+        dist = linesegmentdist(0, gamma[:,0], gamma[:,1])
         criteria = sep * dist
     elif 'var' in method: # Height Variance Method
         # Note: We don't include the number of looks in the equation, as we
@@ -549,7 +556,7 @@ def rvogblselect(gamma, kz, method='prod', minkz=0.0314, gammaminor=None):
         print('kapok.rvog.rvogblselect | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using height variance. ('+time.ctime()+')')
         criteria = np.abs(gamma[:,0]) ** 2
         criteria = -1*np.sqrt((1-criteria)/2/criteria)/np.abs(kz)
-    else: # Eccentricity Method
+    elif 'ecc' in method: # Eccentricity Method
         if gammaminor is not None:
             print('kapok.rvog.rvogblselect | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using coherence region eccentricity. ('+time.ctime()+')')
             criteria = (np.abs(gammaminor[:,0] - gammaminor[:,1])/np.abs(gamma[:,0] - gamma[:,1])) ** 2
@@ -557,6 +564,11 @@ def rvogblselect(gamma, kz, method='prod', minkz=0.0314, gammaminor=None):
         else:
             print('kapok.rvog.rvogblselect | Using eccentricity method for baseline selection, but gammaminor keyword has not been set.  Aborting.')
             return None
+    else: # Default to Coherence Magnitude * Separation Product Method
+        print('kapok.rvog.rvogblselect | Performing incoherent multi-baseline RVoG inversion.  Selecting baselines using product of average coherence magnitude and separation. ('+time.ctime()+')')
+        sep = np.abs(gamma[:,0] - gamma[:,1])
+        mag = np.abs(gamma[:,0] + gamma[:,1])
+        criteria = sep * mag
     
     
     # Remove too small baselines.
