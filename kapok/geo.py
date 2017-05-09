@@ -99,7 +99,7 @@ def radar2ll(outpath, datafile, data, lat, lon, outformat='ENVI',
     outfile = outpath+'templat.vrt'
     with open(outfile, "w") as hdr:
         hdr.write('<VRTDataset rasterXSize="'+str(xsize)+'" rasterYSize="'+str(ysize)+'">\n')
-        hdr.write('  <VRTRasterBand dataType="CFloat32" band="1" subClass="VRTRawRasterBand">\n')
+        hdr.write('  <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">\n')
         hdr.write('    <SourceFilename relativetoVRT="1">templat.dat</SourceFilename>\n')
         hdr.write('    <ImageOffset>0</ImageOffset>\n')
         hdr.write('    <PixelOffset>4</PixelOffset>\n')
@@ -111,7 +111,7 @@ def radar2ll(outpath, datafile, data, lat, lon, outformat='ENVI',
     outfile = outpath+'templon.vrt'
     with open(outfile, "w") as hdr:
         hdr.write('<VRTDataset rasterXSize="'+str(xsize)+'" rasterYSize="'+str(ysize)+'">\n')
-        hdr.write('  <VRTRasterBand dataType="CFloat32" band="1" subClass="VRTRawRasterBand">\n')
+        hdr.write('  <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">\n')
         hdr.write('    <SourceFilename relativetoVRT="1">templon.dat</SourceFilename>\n')
         hdr.write('    <ImageOffset>0</ImageOffset>\n')
         hdr.write('    <PixelOffset>4</PixelOffset>\n')
@@ -135,7 +135,7 @@ def radar2ll(outpath, datafile, data, lat, lon, outformat='ENVI',
         hdr.write('    <MDI key="Y_BAND">1</MDI>\n')
         hdr.write('    <MDI key="Y_DATASET">'+outpath+'templat.vrt</MDI>\n')
         hdr.write('  </Metadata>\n')
-        hdr.write('  <VRTRasterBand dataType="CFloat32" band="1" subClass="VRTRawRasterBand">\n')
+        hdr.write('  <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">\n')
         hdr.write('    <SourceFilename relativetoVRT="1">tempdata.dat</SourceFilename>\n')
         hdr.write('    <ImageOffset>0</ImageOffset>\n')
         hdr.write('    <PixelOffset>4</PixelOffset>\n')
