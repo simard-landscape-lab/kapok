@@ -1328,12 +1328,13 @@ class Scene(object):
         return
 
 
-    def geo(self, data, outfile, outformat='ENVI', resampling='bilinear',
-            nodataval=None, tr=None):
+    def geo(self, data, outfile, outformat='ENVI', resampling='pyresample',
+            nodataval=None, tr=2.7777778e-4, **kwargs):
         """Output a geocoded raster.
         
             Resampling from radar coordinates to latitude/longitude using
-            gdalwarp.
+            either pyresample library, or gdalwarp (see description of
+            'resampling' keyword argument, below).
             
             Arguments:
                 data: Either a 2D array containing the data to geocode, or a
@@ -1348,16 +1349,24 @@ class Scene(object):
                     include 'GTiff' or 'KEA', etc.  For reference, see
                     http://www.gdal.org/formats_list.html.
                 resampling (str): String identifying the resampling method.
-                    Options include 'near', 'bilinear', 'cubic', 'lanczos',
-                    and others.  Default is 'bilinear'.  For reference and
-                    more options, see http://www.gdal.org/gdalwarp.html.
+                    The default option is 'pyresample', which uses the
+                    pyresample Python library as implemented in the 
+                    kapok.geo.radar2ll_pr() function).  Other options use
+                    GDAL with the gdalwarp command line tool, as implemented
+                    in the kapok.geo.radar2ll_gdal() function.  Possible GDAL
+                    resampling options include 'near', 'bilinear', 'cubic',
+                    'average', and others.  For reference and more options,
+                    see http://www.gdal.org/gdalwarp.html.
+                    Default: 'pyresample'.
                 nodataval:  No data value for the output raster.  This will be the
                     value of the raster for all pixels outside the input data
                     extent.  Default: None.
                 tr (float): Set output file resolution (in degrees).  Can be set
                     to a tuple to set (longitude, latitude) resolution separately.
-                    Default: None (GDAL will decide output file resolution based on
-                    input).
+                    If you are using a gdalwarp-based resampling method, tr
+                    can be set to None in order for gdalwarp to choose the
+                    output resolution automatically based on the input data.
+                    Default: 2.7777778e-4 (1 arc second).
             
         """        
         if isinstance(data, str):
@@ -1365,9 +1374,20 @@ class Scene(object):
         
         outpath, outfile = os.path.split(outfile)
         
-        kapok.geo.radar2ll(outpath, outfile, data, self.lat[:], self.lon[:],
-                           outformat=outformat, resampling=resampling,
-                           nodataval=nodataval, tr=tr)
+        if 'pyresample' in resampling:
+            try:
+                import pyresample as pr
+            except ImportError:
+                print('kapok.Scene.geo | "pyresample" chosen as resampling method, but pyresample Python library cannot be imported!  Make sure it is installed, or use the gdalwarp-based geocoding implementation by changing the resampling keyword.  Aborting.')
+                return
+            print('kapok.Scene.geo | Performing geocoding using pyresample library. ('+time.ctime+')')
+            kapok.geo.radar2ll_pr(outpath, outfile, data, self.lat[:], self.lon[:],
+                               outformat=outformat, nodataval=nodataval, tr=tr)
+        else:
+            print('kapok.Scene.geo | Performing geocoding using gdalwarp. ('+time.ctime+')')
+            kapok.geo.radar2ll_gdal(outpath, outfile, data, self.lat[:], self.lon[:],
+                               outformat=outformat, resampling=resampling,
+                               nodataval=nodataval, tr=tr)
         
         return
 

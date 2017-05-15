@@ -64,7 +64,7 @@ setup(
     packages=find_packages(exclude=['docs', 'tests', 'scripts']),
     
     # Required Packages
-    install_requires=['numpy', 'scipy', 'matplotlib', 'h5py', 'cython', 'gdal'],
+    install_requires=['numpy', 'scipy', 'matplotlib', 'h5py', 'cython', 'gdal', 'pyresample'],
     
     # Cython Modules
     ext_modules = cythonize(['kapok/cohoptc.pyx', 'kapok/rvogc.pyx', 'kapok/uavsarc.pyx']),

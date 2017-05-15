@@ -4,7 +4,7 @@
     Use GDAL to make output products resampled to geographic projection with
     constant lat/lon spacing.
     
-    Author: Michael Denbina
+    Authors: Brian Hawkins, Michael Denbina
 	
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
@@ -30,19 +30,157 @@ import subprocess
 import sys
 
 import numpy as np
-
-from kapok.lib import bilinear_interpolate
-have_pyresample = False
 try:
     import pyresample as pr
 except ImportError:
     pass
-else:
-    have_pyresample = True
+
+from kapok.lib import bilinear_interpolate
+
+
+
+def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
+                nodataval=None, tr=2.7777778e-4, **kwargs):
+    """Create a geocoded file, in geographic projection, from input data
+    in azimuth, slant range radar coordinates.
+
+    Uses latitude and longitude arrays containing the geographic coordinates
+    of each pixel (geolocation arrays), in order to perform the resampling
+    using the pyresample Python library
+    (https://pypi.python.org/pypi/pyresample).
+    
+    Author: Brian Hawkins
+
+    Arguments:
+        outpath (str): The path in which to save the geocoded file, as well as
+            temporary latitude/longitude files used during the resampling
+            process.
+        datafile (str): The output file name for the geocoded file.
+        data (array): 2D array containing the data to geocode.  Should be
+            in float32 format.  (If it isn't, it will be converted to it.)
+            If resampling of complex-valued parameters is needed, geocode
+            the real and imaginary parts separately using this function.
+        lat (array): 2D array containing the latitudes for each pixel, in
+            degrees.
+        lon (array): 2D array containing the longitudes for each pixel, in
+            degrees.
+        outformat (str): The output format.  Should be an identifying string
+            recognized by GDAL.  Default is 'ENVI'.  Other options include
+            'GTiff' or 'KEA', etc.  For reference, see
+            http://www.gdal.org/formats_list.html.
+        nodataval:  No data value for the output raster.  This will be the
+            value of the raster for all pixels outside the input data
+            extent.  Default: None (points will be set to zero).
+        tr (float): Set output file resolution (in degrees).  Can be set
+            to a tuple to set (longitude, latitude) resolution separately.
+            Default: 2.7777778e-4 (1 arc second).
+
+    """
+    if sys.byteorder == 'little':
+        byte = 'LSB'
+    else:
+        byte = 'MSB'
+
+    if outpath != '':
+        outpath = outpath + '/'
+
+    # Figure out output posting.
+    if isinstance(tr, tuple):
+        dlon, dlat = [float(x) for x in tr[:2]]
+    else:
+        dlon = dlat = float(tr)
+    dlat = abs(dlat)
+    dlon = abs(dlon)
+
+    # Figure out bounding box in lat/lon domain.
+    lat0 = np.max(lat)
+    lat1 = np.min(lat)
+    lon0 = np.min(lon)
+    lon1 = np.max(lon)
+
+    # Clip to integer dlat/dlon grid.
+    pad = 10.5
+    ilat0 = int(lat0/dlat + pad)
+    ilat1 = int(lat1/dlat - pad)
+    ilon0 = int(lon0/dlat - pad)
+    ilon1 = int(lon1/dlat + pad)
+    nlat = ilat0 - ilat1
+    nlon = ilon1 - ilon0
+    lat0 = ilat0 * dlat
+    lon0 = ilon0 * dlon
+
+    # Define output grid.
+    x = lon0 + dlon * np.arange(nlon)
+    y = lat0 - dlat * np.arange(nlat)
+    X, Y = np.meshgrid(x, y)
+    area = pr.geometry.GridDefinition(lons=X, lats=Y)
+
+    # Define input grid.
+    swath = pr.geometry.SwathDefinition(lons=lon, lats=lat)
+
+    # Figure out scale for Gaussian smoothing, assuming we're on Earth.
+    dx = 6378137. * np.radians(dlat)
+    scale = pr.utils.fwhm2sigma(dx)
+
+    # Cast input data to float32.
+    data = data.astype('float32')
+
+    # TODO: Number of neighbors to query is related to ratio of input and
+    # output grid spacing.
+    nn = kwargs.get('nn', 36)
+    out = pr.kd_tree.resample_gauss(swath, data, area, radius_of_influence=3*dx,
+                                    sigmas=scale, neighbours=nn, segments=1)
+
+    # Careful, these routines can promote floats to doubles.
+    outdata = out.astype('f4')
+    outfile = outpath + 'out.dat'
+    with open(outfile, 'w') as f:
+        outdata.tofile(f)
+
+    # Create a VRT file.
+    lineoffset = 4 * nlon
+    # Pyresample doesn't seem to have a clear statement of what the pixel
+    # address convention is, so assume centered coordinates.  Move to edge for
+    # VRT file.  This gives good agreement with GDAL version (as measured by
+    # ampcor) and good self-consistency between different resolutions (as
+    # observed in Google Earth).
+    ullat = lat0 + 0.5 * dlat
+    ullon = lon0 - 0.5 * dlon
+    vrt = """\
+        <VRTDataset rasterXSize="{nlon}" rasterYSize="{nlat}">
+          <SRS>GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4326"]]</SRS>
+          <GeoTransform> {ullon:0.17g}, {dlon:0.17g}, 0.0, {ullat:0.17g}, 0.0, -{dlat:0.17g}</GeoTransform>
+          <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">
+            <SourceFilename relativetoVRT="1">{outfile}</SourceFilename>
+            <ImageOffset>0</ImageOffset>
+            <PixelOffset>4</PixelOffset>
+            <LineOffset>{lineoffset}</LineOffset>
+            <ByteOrder>{byte}</ByteOrder>
+          </VRTRasterBand>
+        </VRTDataset>
+    """.format(**locals())
+    vrtname = outpath + 'out.vrt'
+    with open(vrtname, 'w') as f:
+        f.write(vrt)
+
+    # Call GDAL
+    command = 'gdal_translate -ot Float32 -of ' + outformat
+    if nodataval is not None:
+        command = command + ' -dstnodata '+str(nodataval)
+    command = ' '.join((command, vrtname, outpath+datafile))
+    print(command)
+    print(subprocess.getoutput(command))
+
+    # Remove temporary files.
+    os.remove(vrtname)
+    if 'VRT' not in outformat.upper():
+        os.remove(outfile)
+    
+    return
 
 
 def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
-                  resampling='bilinear', nodataval=None, tr=None, **kw):
+                  resampling='bilinear', nodataval=None, tr=2.7777778e-4):
     """Create a geocoded file, in geographic projection, from input data
     in azimuth, slant range radar coordinates.
     
@@ -50,6 +188,8 @@ def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
     of each pixel (geolocation arrays), in order to perform the resampling
     using gdalwarp.  For gdalwarp reference, see
     http://www.gdal.org/gdalwarp.html.
+    
+    Author: Michael Denbina
     
     Arguments:
         outpath (str): The path in which to save the geocoded file, as well as
@@ -77,8 +217,9 @@ def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
             extent.  Default: None.
         tr (float): Set output file resolution (in degrees).  Can be set
             to a tuple to set (longitude, latitude) resolution separately.
-            Default: None (GDAL will decide output file resolution based on
-            input).
+            Can be set to None in order for gdalwarp to automatically choose
+            an output resolution based on input data spacing.
+            Default: 2.7777778e-4 (1 arc second).
     
     """   
     if sys.byteorder == 'little':
@@ -182,151 +323,13 @@ def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
     
     return
 
-def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
-                nodataval=None, tr=2.77e-4, **kw):
-    """Create a geocoded file, in geographic projection, from input data
-    in azimuth, slant range radar coordinates.
-
-    Uses latitude and longitude arrays containing the geographic coordinates
-    of each pixel (geolocation arrays), in order to perform the resampling
-    using gdalwarp.  For gdalwarp reference, see
-    http://www.gdal.org/gdalwarp.html.
-
-    Arguments:
-        outpath (str): The path in which to save the geocoded file, as well as
-            temporary latitude/longitude files used during the resampling
-            process.
-        datafile (str): The output file name for the geocoded file.
-        data (array): 2D array containing the data to geocode.  Should be
-            in float32 format.  (If it isn't, it will be converted to it.)
-            If resampling of complex-valued parameters is needed, geocode
-            the real and imaginary parts separately using this function.
-        lat (array): 2D array containing the latitudes for each pixel, in
-            degrees.
-        lon (array): 2D array containing the longitudes for each pixel, in
-            degrees.
-        outformat (str): The output format.  Should be an identifying string
-            recognized by GDAL.  Default is 'ENVI'.  Other options include
-            'GTiff' or 'KEA', etc.  For reference, see
-            http://www.gdal.org/formats_list.html.
-        nodataval:  No data value for the output raster.  This will be the
-            value of the raster for all pixels outside the input data
-            extent.  Default: None.
-        tr (float): Set output file resolution (in degrees).  Can be set
-            to a tuple to set (longitude, latitude) resolution separately.
-
-    """
-    if sys.byteorder == 'little':
-        byte = 'LSB'
-    else:
-        byte = 'MSB'
-
-    if outpath != '':
-        outpath = outpath + '/'
-
-    # Figure out output posting.
-    if isinstance(tr, tuple):
-        dlon, dlat = [float(x) for x in tr[:2]]
-    else:
-        dlon = dlat = float(tr)
-    dlat = abs(dlat)
-    dlon = abs(dlon)
-
-    # Figure out bounding box in lat/lon domain.
-    lat0 = np.max(lat)
-    lat1 = np.min(lat)
-    lon0 = np.min(lon)
-    lon1 = np.max(lon)
-
-    # Clip to integer dlat/dlon grid.
-    pad = 10.5
-    ilat0 = int(lat0/dlat + pad)
-    ilat1 = int(lat1/dlat - pad)
-    ilon0 = int(lon0/dlat - pad)
-    ilon1 = int(lon1/dlat + pad)
-    nlat = ilat0 - ilat1
-    nlon = ilon1 - ilon0
-    lat0 = ilat0 * dlat
-    lon0 = ilon0 * dlon
-
-    # Define output grid.
-    x = lon0 + dlon * np.arange(nlon)
-    y = lat0 - dlat * np.arange(nlat)
-    X, Y = np.meshgrid(x, y)
-    area = pr.geometry.GridDefinition(lons=X, lats=Y)
-
-    # Define input grid.
-    swath = pr.geometry.SwathDefinition(lons=lon, lats=lat)
-
-    # Figure out scale for Gaussian smoothing, assuming we're on Earth.
-    dx = 6378137. * np.radians(dlat)
-    scale = pr.utils.fwhm2sigma(dx)
-
-    # Cast input data to float32.
-    data = data.astype('float32')
-
-    # TODO Number of neighbors to query is related to ratio of input and output
-    # grid spacing.
-    nn = kw.get('nn', 36)
-    out = pr.kd_tree.resample_gauss(swath, data, area, radius_of_influence=3*dx,
-                                    sigmas=scale, neighbours=nn, segments=1)
-
-    # Careful, these routines can promote floats to doubles.
-    outdata = out.astype('f4')
-    outfile = outpath + 'out.dat'
-    with open(outfile, 'w') as f:
-        outdata.tofile(f)
-
-    # Create a VRT file.
-    lineoffset = 4 * nlon
-    # XXX pyresample doesn't seem to have a clear statement of what the pixel
-    # address convention is, so assume centered coordinates.  Move to edge for
-    # VRT file.  This gives good agreement with GDAL version (as measured by
-    # ampcor) and good self-consistency between different resolutions (as
-    # observed in Google Earth).
-    ullat = lat0 + 0.5 * dlat
-    ullon = lon0 - 0.5 * dlon
-    vrt = """\
-        <VRTDataset rasterXSize="{nlon}" rasterYSize="{nlat}">
-          <SRS>GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4326"]]</SRS>
-          <GeoTransform> {ullon:0.17g}, {dlon:0.17g}, 0.0, {ullat:0.17g}, 0.0, -{dlat:0.17g}</GeoTransform>
-          <VRTRasterBand dataType="Float32" band="1" subClass="VRTRawRasterBand">
-            <SourceFilename relativetoVRT="1">{outfile}</SourceFilename>
-            <ImageOffset>0</ImageOffset>
-            <PixelOffset>4</PixelOffset>
-            <LineOffset>{lineoffset}</LineOffset>
-            <ByteOrder>{byte}</ByteOrder>
-          </VRTRasterBand>
-        </VRTDataset>
-    """.format(**locals())
-    vrtname = outpath + 'out.vrt'
-    with open(vrtname, 'w') as f:
-        f.write(vrt)
-
-    # Call GDAL
-    command = 'gdal_translate -ot Float32 -of ' + outformat
-    if nodataval is not None:
-        command = command + ' -dstnodata '+str(nodataval)
-    command = ' '.join((command, vrtname, outpath+datafile))
-    print(command)
-    print(subprocess.getoutput(command))
-
-    # Remove temporary files.
-    os.remove(vrtname)
-    if 'VRT' not in outformat.upper():
-        os.remove(outfile)
-    
-    return
-
-if have_pyresample:
-    radar2ll = radar2ll_pr
-else:
-    radar2ll = radar2ll_gdal
 
 def ll2radar(data, origin, spacing, lat, lon):
     """Convert an array in geographic (lat,lon) coordinates into a
     corresponding array in the (azimuth, slant range) coordinates of the
     radar image.
+    
+    Author: Michael Denbina
     
     Arguments:
         data (array): 2D array containing data in regularly spaced latitude/
