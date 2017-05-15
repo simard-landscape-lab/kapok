@@ -1333,7 +1333,7 @@ class Scene(object):
         """Output a geocoded raster.
         
             Resampling from radar coordinates to latitude/longitude using
-            either pyresample library, or gdalwarp (see description of
+            either the pyresample library, or gdalwarp (see description of
             'resampling' keyword argument, below).
             
             Arguments:
@@ -1351,7 +1351,7 @@ class Scene(object):
                 resampling (str): String identifying the resampling method.
                     The default option is 'pyresample', which uses the
                     pyresample Python library as implemented in the 
-                    kapok.geo.radar2ll_pr() function).  Other options use
+                    kapok.geo.radar2ll_pr() function.  Other options use
                     GDAL with the gdalwarp command line tool, as implemented
                     in the kapok.geo.radar2ll_gdal() function.  Possible GDAL
                     resampling options include 'near', 'bilinear', 'cubic',
