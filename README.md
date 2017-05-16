@@ -10,7 +10,7 @@ For reference, also see the following journal articles for PolInSAR forest heigh
 
 M. Simard and M. Denbina, "Forest Canopy Height Estimation with Airborne Repeat-Pass L-Band Polarimetric SAR Interferometry in North American Temperate and Boreal Forests," IEEE Journal of Selected Topics in Applied Earth Observations and Remote Sensing, Submitted, 2017.
 
-M. Denbina and M. Simard, "The effects of topography on forest height and structure estimation from PolInSAR," IEEE Transactions on Geoscience and Remote Sensing, Submitted, 2016.
+M. Denbina and M. Simard, "The effects of topography on forest height and structure estimation from PolInSAR," IEEE Transactions on Geoscience and Remote Sensing, Submitted, 2017.
 
 This library is dependent on the following open source software libraries:
 
@@ -20,6 +20,7 @@ This library is dependent on the following open source software libraries:
 * matplotlib
 * Cython
 * Geospatial Data Abstraction Library (GDAL)
+* pyresample
 
 See docs/manual.pdf for a user's manual and basic tutorial.  The docs/ folder also contains installation guides for Mac OSX and Windows.
 

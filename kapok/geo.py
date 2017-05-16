@@ -129,7 +129,8 @@ def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
     # output grid spacing.
     nn = kwargs.get('nn', 36)
     out = pr.kd_tree.resample_gauss(swath, data, area, radius_of_influence=3*dx,
-                                    sigmas=scale, neighbours=nn, segments=1)
+                                    sigmas=scale, neighbours=nn, segments=1,
+                                    fill_value=nodataval)
 
     # Careful, these routines can promote floats to doubles.
     outdata = out.astype('f4')
@@ -166,7 +167,7 @@ def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
     # Call GDAL
     command = 'gdal_translate -ot Float32 -of ' + outformat
     if nodataval is not None:
-        command = command + ' -dstnodata '+str(nodataval)
+        command = command + ' -a_nodata '+str(nodataval)
     command = ' '.join((command, vrtname, outpath+datafile))
     print(command)
     print(subprocess.getoutput(command))
