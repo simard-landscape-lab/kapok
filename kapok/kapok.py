@@ -1380,11 +1380,11 @@ class Scene(object):
             except ImportError:
                 print('kapok.Scene.geo | "pyresample" chosen as resampling method, but pyresample Python library cannot be imported!  Make sure it is installed, or use the gdalwarp-based geocoding implementation by changing the resampling keyword.  Aborting.')
                 return
-            print('kapok.Scene.geo | Performing geocoding using pyresample library. ('+time.ctime+')')
+            print('kapok.Scene.geo | Performing geocoding using pyresample library. ('+time.ctime()+')')
             kapok.geo.radar2ll_pr(outpath, outfile, data, self.lat[:], self.lon[:],
                                outformat=outformat, nodataval=nodataval, tr=tr)
         else:
-            print('kapok.Scene.geo | Performing geocoding using gdalwarp. ('+time.ctime+')')
+            print('kapok.Scene.geo | Performing geocoding using gdalwarp. ('+time.ctime()+')')
             kapok.geo.radar2ll_gdal(outpath, outfile, data, self.lat[:], self.lon[:],
                                outformat=outformat, resampling=resampling,
                                nodataval=nodataval, tr=tr)

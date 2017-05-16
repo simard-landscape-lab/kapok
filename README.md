@@ -2,7 +2,7 @@
 
 Kapok is a Python library created for the purposes of estimating forest height and structure using data collected by NASA's Uninhabited Aerial Vehicle Synthetic Aperture Radar (UAVSAR) instrument.  The library contains implementations of basic algorithms for processing of polarimetric SAR interferometry (PolInSAR) data, and allows easy import of UAVSAR SLC (single-look complex) stacks (UAVSAR data from multiple repeat-pass flights).
 
-Software primarily designed and written by Michael Denbina.  Brian Hawkins contributed kapok.geo.radar2ll_pr, a geocoding function using the pyresample library.  Maxim Neumann contributed a number of ideas regarding the structure and data organization of Kapok, as well as library functions for coordinate transformations and indexing of baselines.  See individual source code files for more detailed author information.
+Software primarily designed and written by Michael Denbina.  Brian Hawkins contributed a geocoding function using the pyresample library.  Maxim Neumann contributed a number of ideas regarding the overall structure and data organization of Kapok, as well as library functions for coordinate transformations and indexing of baselines.  See individual source code files for more detailed author information.
 
 If you use this software in a published work, please cite it using the following DOI: https://doi.org/10.5281/zenodo.167040
 
