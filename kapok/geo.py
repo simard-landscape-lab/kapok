@@ -76,6 +76,9 @@ def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
             Default: 2.7777778e-4 (1 arc second).
 
     """
+    if nodataval is None:
+        nodataval = 0.0
+        
     if sys.byteorder == 'little':
         byte = 'LSB'
     else:
