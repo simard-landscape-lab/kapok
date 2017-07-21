@@ -1,4 +1,4 @@
-[![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](http://www.gnu.org/licenses/gpl-3.0) [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.167040.svg)](https://doi.org/10.5281/zenodo.167040)
+[![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](http://www.gnu.org/licenses/gpl-3.0) [![DOI](https://zenodo.org/badge/76489138.svg)](https://zenodo.org/badge/latestdoi/76489138)
 
 # Kapok: An Open Source Python Library for PolInSAR Forest Height Estimation Using UAVSAR Data
 
@@ -6,7 +6,7 @@ Kapok is a Python library created for the purposes of estimating forest height a
 
 Software primarily designed and written by Michael Denbina.  Brian Hawkins contributed a geocoding function using the pyresample library.  Maxim Neumann contributed a number of ideas regarding the overall structure and data organization of Kapok, as well as library functions for coordinate transformations and indexing of baselines.  See individual source code files for more detailed author information.
 
-If you use this software in a published work, please cite it using the following DOI: https://doi.org/10.5281/zenodo.167040
+If you use this software in a published work, please cite it using the following DOI: https://doi.org/10.5281/zenodo.833487
 
 For reference, also see the following journal articles for PolInSAR forest height estimation results using this software:
 

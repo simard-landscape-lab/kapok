@@ -33,9 +33,16 @@ from os import path
 
 here = path.abspath(path.dirname(__file__))
 
-# Get the long description from the README file
-with open(path.join(here, 'README.md'), encoding='utf-8') as f:
-    long_description = f.read()
+# Get the long description from the README file.       
+try:
+    import pypandoc
+    long_description = pypandoc.convert('README.md', 'rst')
+    long_description = long_description.replace("\r","")
+except OSError:
+    print("Pandoc not found. Long_description conversion failure.")
+    with open(path.join(here, 'README.md'), encoding="utf-8") as f:
+        long_description = f.read()
+
 
 setup(
     name='Kapok',
