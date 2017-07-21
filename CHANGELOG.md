@@ -1,7 +1,7 @@
 # Change Log
 
 
-## Unreleased
+## v0.2.0 - 2017-06-13
 ### Added
 - Added scripts demonstrating how the released AfriSAR products for Pongara National Park, Gabon and Lope National Park, Gabon were created.  These scripts are "afrisar_pongara.py" and "afrisar_lope.py" in the /scripts folder.  The previous example processing script has also been updated, and is now called "basic_example.py".
 - Added kapok.rvog.rvogblselect(), a function which performs baseline selection using a number of different possible baseline ranking criteria.  This allows incoherent multi-baseline forest height inversion.  kapok.Scene.inv() will perform this multi-baseline forest height estimation if the "bl" keyword argument is set to either 'all' (to invert all baselines), or to a list of selected baseline indices.  See help(kapok.Scene.inv) for more details, and help(kapok.rvog.rvogblselect) for details on the baseline ranking criteria that are currently available.  Also added "minkz" keyword to kapok.Scene.inv() which sets the minimum kz value.  For multi-baseline inversions, baselines with kz below this value will be excluded.  For single-baseline inversions, the inversion will still be performed if kz is below this value, but a warning will be printed.
@@ -22,6 +22,6 @@
 - Fixed bug in handling of matrix regularization (reg keyword argument) for function kapok.cohopt.pdopt().
 
 
-## v0.1.0 - 2015-11-14
+## v0.1.0 - 2016-11-14
 ### Added
 - Initial software version.  Contains modules for UAVSAR data import, coherence optimization, data visualization, coherence region plotting, ground topography estimation using standard line fit procedure, RVoG forest model inversion, sinc function forest model inversion, and geocoding of output products.  See user's manual and install guide in /docs folder.

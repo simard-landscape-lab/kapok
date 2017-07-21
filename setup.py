@@ -41,7 +41,7 @@ setup(
     name='Kapok',
     version='0.2.0',
 
-    description='A python library for PolInSAR forest height estimation using UAVSAR data.',
+    description='A Python library for PolInSAR forest height estimation using UAVSAR data.',
     long_description=long_description,
     url='https://github.com/mdenbina/kapok',
 

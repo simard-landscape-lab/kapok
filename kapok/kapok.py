@@ -1100,16 +1100,23 @@ class Scene(object):
                 pix (int): If you only wish to calculate the coherence for a
                 single pixel, specify a tuple with the (azimuth,range) indices
                 of the pixel here.
-                bounds (int): If you only wish to calculate the coherence for
+                bounds (tuple): If you only wish to calculate the coherence for
                     a subset of the data, specify the subset boundaries in the
-                    form: (azmin,azmax,rngmin,rngmax).  Note: This keyword
-                    overrides the pix keyword, if both are given.
+                    form: (azmin,azmax,rngmin,rngmax).  If bounds has only
+                    two elements, it will be assumed to be (azmin,azmax), with
+                    the returned data spanning the full width of the swath.
+                    Note: This keyword overrides the pix keyword, if both
+                    are given.
                 **kwargs: Extra keyword arguments.
                 
             Returns:
                 coh (array): A complex coherence image.
             
         """
+        if bounds is not None:
+            if len(bounds) == 2:
+                bounds = (bounds[0], bounds[1], 0, self.dim[1])
+        
         if polb is None:
             polb = pol
             
@@ -1393,11 +1400,13 @@ class Scene(object):
 
 
     def ingest(self, file, name, attrname=None, attrunits='', overwrite=False):
-        """Ingest ancillary data into Kapok HDF5 file.
+        """Ingest ancillary raster data in the WGS84 Geographic coordinate
+            system, reproject into radar coordinates, and save in the Kapok
+            HDF5 file.
         
-            Allows the user to import ancillary raster data in ENVI format such as
-            lidar, external DEMs, etc.  This external raster data will be
-            resampled to the radar coordinates using bilinear interpolation,
+            Allows the user to import ancillary raster data in ENVI format
+            such as lidar, external DEMs, etc.  This external raster data will
+            be resampled to the radar coordinates using bilinear interpolation,
             then saved to the HDF5 file as datasets with the same dimensions as
             the radar data. The ingested data can then be compared to the
             radar-derived products or used in guided inversion functions, etc.
@@ -1405,7 +1414,7 @@ class Scene(object):
             Data will be stored in the HDF5 file under 'ancillary/<name>', where
             <name> is the string given in the name argument to this function.
             
-            N.B. The data to import should be in ENVI format, in WGS84 Geographic
+            N.B. The data to import must be in WGS84 Geographic
             (latitude, longitude) coordinates.
             
             Arguments:
@@ -1414,13 +1423,13 @@ class Scene(object):
                 name (str): Name of the HDF5 dataset which will be created to
                     store the ingested data.
                 attrname (str): Name which will be put into a 'name' attribute
-                    of the dataset.  Will be shown when displaying the data using
-                    Scene.show(), etc.  Default: Same as name.
-                attrunits (str): Units of the data.  Will be shown on plots of the
-                    data using Scene.show(), etc.
+                    of the dataset.  Will be shown when displaying the data
+                    using Scene.show(), etc.  Default: Same as name.
+                attrunits (str): Units of the data.  Will be shown on plots of
+                    the data using Scene.show(), etc.
                 overwrite (bool): Set to True to overwrite an already existing
-                    HDF5 dataset, if one already exists under the same name as the
-                    name input argument.  Default: False.
+                    HDF5 dataset, if one already exists under the same name as
+                    the name input argument.  Default: False.
                 
             Returns:
                 data: A link to the newly created HDF5 dataset containing the
