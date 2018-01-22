@@ -283,10 +283,12 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
                 if len(file) == 1:            
                     slcfiles.append(file[0])
                 elif len(file) > 1:
-                    print('kapok.uavsar.load | Too many SLC files matching pattern: "'+datapath+tracknames[tr]+'*_'+pol+'_*_1x1.slc'+'".  Aborting.')
+                    print('kapok.uavsar.load | Too many SLC files matching pattern: "'+datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc'+'".  Aborting.')
                     return
                 else:
-                    print('kapok.uavsar.load | Cannot find SLC file matching pattern: "'+datapath+tracknames[tr]+'*_'+pol+'_*_1x1.slc'+'".  Aborting.')
+                    print('kapok.uavsar.load | Cannot find SLC file matching pattern: "'+datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc'+'".  Aborting.')
+                    if seg > 0:
+                        print('kapok.uavsar.load | Please ensure that you downloaded all segments of the data from the UAVSAR download page by using the "Segment 1", "Segment 2", etc., radio buttons.')
                     return
     
     
@@ -821,12 +823,12 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
                 for n in range(num_segments):
                     azsize_slc[n] = ann.query('slc_'+str(n+1)+'_2x8 Rows')
             else:
-                azsize_slc = ann.query('slc_1_8x2 Rows')
+                azsize_slc = ann.query('slc_1_2x8 Rows')
         elif len(file) > 1:
-            print('kapok.uavsar.quicklook | Too many SLC files matching pattern: "'+datapath+tracknames[tr]+'*_'+pol+'_*_2x8.slc'+'".  Aborting.')
+            print('kapok.uavsar.quicklook | Too many SLC files matching pattern: "'+datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_2x8.slc'+'".  Aborting.')
             return
         else:
-            file = glob(datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_4x1.slc')
+            file = glob(datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x4.slc')
             
             if len(file) == 1:
                 slcfiles.append(file[0])
@@ -839,7 +841,7 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
                 else:
                     azsize_slc = ann.query('slc_1_1x4 Rows')
             elif len(file) > 1:
-                print('kapok.uavsar.quicklook | Too many SLC files matching pattern: "'+datapath+tracknames[tr]+'*_'+pol+'_*_1x4.slc'+'".  Aborting.')
+                print('kapok.uavsar.quicklook | Too many SLC files matching pattern: "'+datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x4.slc'+'".  Aborting.')
                 return
             else:
                 file = glob(datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc')
@@ -855,10 +857,12 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
                     else:
                         azsize_slc = ann.query('slc_1_1x1 Rows')
                 elif len(file) > 1:
-                    print('kapok.uavsar.quicklook | Too many SLC files matching pattern: "'+datapath+tracknames[tr]+'*_'+pol+'_*_1x1.slc'+'".  Aborting.')
+                    print('kapok.uavsar.quicklook | Too many SLC files matching pattern: "'+datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc'+'".  Aborting.')
                     return
                 else:
-                    print('kapok.uavsar.quicklook | Cannot find SLC file matching pattern: "'+datapath+tracknames[tr]+'*_'+pol+'_*_1x1.slc'+'".  Aborting.')
+                    print('kapok.uavsar.quicklook | Cannot find SLC file matching pattern: "'+datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc'+'".  Aborting.')
+                    if seg > 0:
+                        print('kapok.uavsar.quicklook | Please ensure that you downloaded all segments of the data from the UAVSAR download page by using the "Segment 1", "Segment 2", etc., radio buttons.')
                     return
     
     
