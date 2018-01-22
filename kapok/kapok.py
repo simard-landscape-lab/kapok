@@ -1591,6 +1591,10 @@ class Scene(object):
         for key in self.f.attrs:
             f.attrs[key] = self.f.attrs[key]
         
+        # Update dimensions.
+        if bounds_set:
+            f.attrs['dim'] = (bounds[1]-bounds[0], bounds[3]-bounds[2])
+        
         # Update track attributes.
         if tracks_set:
             f.attrs['tracks'] = self.f.attrs['tracks'][tracks]
