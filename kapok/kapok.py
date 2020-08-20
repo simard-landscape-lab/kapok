@@ -213,8 +213,8 @@ class Scene(object):
         Arguments:
             bl (int or tuple): The baseline of interest.  This argument can
                 either be the baseline index itself, or in the form of a tuple
-                of track indices (first value is the master track, second
-                value is the slave track).  Note: All baselines and tracks
+                of track indices (first value is the reference track, second
+                value is the secondary track).  Note: All baselines and tracks
                 are indexed starting at zero.  bl=(0,1) returns the kz values
                 between the first and second tracks.  See lib/mb.py for an
                 explanation of how baselines are indexed.
@@ -1093,9 +1093,10 @@ class Scene(object):
                     magnitude with the 'groundmag' keyword argument, which
                     will be passed along to kapok.topo.groundsolver through
                     **kwargs.  Default: 0.
-                polb: If different master and slave track polarizations are
-                    desired, specify the slave polarization here.  Use same
-                    form (int, str, or list) as pol.  Default: None (polb=pol).
+                polb: If different reference and secondary track polarizations
+                    are desired, specify the secondary polarization here.  Use
+                    same form (int, str, or list) as pol.  Default: None
+                    (polb=pol).
                 bl (int): Desired baseline index.  Default: 0.
                 pix (int): If you only wish to calculate the coherence for a
                 single pixel, specify a tuple with the (azimuth,range) indices

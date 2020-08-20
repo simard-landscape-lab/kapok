@@ -139,7 +139,7 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0.0, rngslope=0.0,
                 coherences from the coherence optimization.
             phi (array): 2D complex-valued array containing the ground
                 coherences (e.g., from kapok.topo.groundsolver()).
-            inc (array): 2D array containing the master track incidence
+            inc (array): 2D array containing the reference track incidence
                 angle, in radians.
             kz (array): 2D array containing the kz values, in radians/meter.
             ext: Fixed values for the extinction parameter, in Nepers/meter.
