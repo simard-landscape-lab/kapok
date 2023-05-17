@@ -34,14 +34,14 @@ from os import path
 here = path.abspath(path.dirname(__file__))
 
 # Get the long description from the README file.       
-try:
-    import pypandoc
-    long_description = pypandoc.convert_file('README.md', 'rst')
-    long_description = long_description.replace("\r","")
-except ImportError:
-    print("Pandoc not found. Long_description conversion failure.")
-    with open(path.join(here, 'README.md'), encoding="utf-8") as f:
-        long_description = f.read()
+# try:
+#     import pypandoc
+#     long_description = pypandoc.convert_file('README.md', 'rst')
+#     long_description = long_description.replace("\r","")
+# except ImportError:
+# print("Pandoc not found. Long_description conversion failure.")
+with open(path.join(here, 'README.md'), encoding="utf-8") as f:
+    long_description = f.read()
 
 
 setup(
