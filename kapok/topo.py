@@ -91,7 +91,7 @@ def groundsolver(gamma, kz=None, groundmag=None, gammavol=None,
     solutions = linefit(gamma, groundmag)
     
     if kz is not None:
-        if not isinstance(kz, (collections.Sequence, np.ndarray)):
+        if not isinstance(kz, (collections.abc.Sequence, np.ndarray)):
             kz = np.ones((gamma.shape[1],gamma.shape[2]),dtype='float32') * kz
             
         # Get the volume-dominated coherences corresponding to each ground solution. (Observed coherence farthest from ground.)
@@ -165,7 +165,7 @@ def linefit(gamma, groundmag=None):
     """
     if groundmag is None:
         groundmag = np.ones((gamma.shape[1],gamma.shape[2]),dtype='float32')
-    elif not isinstance(groundmag, (collections.Sequence, np.ndarray)):
+    elif not isinstance(groundmag, (collections.abc.Sequence, np.ndarray)):
         groundmag = np.ones((gamma.shape[1],gamma.shape[2]),dtype='float32') * groundmag
         
     groundmag[groundmag > 1] = 1.0

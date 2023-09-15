@@ -198,13 +198,13 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0.0, rngslope=0.0,
     elif np.all(limit2pi == False):
         limit2pi = np.zeros(dim, dtype='bool')
         
-    if isinstance(hv_max, (collections.Sequence, np.ndarray)):
+    if isinstance(hv_max, (collections.abc.Sequence, np.ndarray)):
         hv_max_clip = hv_max.copy()[mask]
         hv_max = np.nanmax(hv_max)
     else:
         hv_max_clip = None
         
-    if isinstance(hv_min, (collections.Sequence, np.ndarray)):
+    if isinstance(hv_min, (collections.abc.Sequence, np.ndarray)):
         hv_min_clip = hv_min.copy()[mask]
         hv_min = np.nanmin(hv_min)
     else:
@@ -233,7 +233,7 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0.0, rngslope=0.0,
     kzclip = kz[mask]
     limit2piclip = limit2pi[mask]
     
-    if isinstance(mu, (collections.Sequence, np.ndarray)):
+    if isinstance(mu, (collections.abc.Sequence, np.ndarray)):
         muclip = mu[mask]
     elif isinstance(mu, dict):
         if not silent:        
@@ -242,12 +242,12 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0.0, rngslope=0.0,
     else:
         muclip = np.ones(gammaclip.shape, dtype='float32') * mu
         
-    if isinstance(rngslope, (collections.Sequence, np.ndarray)):
+    if isinstance(rngslope, (collections.abc.Sequence, np.ndarray)):
         rngslopeclip = rngslope[mask]
     else:
         rngslopeclip = np.ones(gammaclip.shape, dtype='float32') * rngslope
     
-    if isinstance(ext, (collections.Sequence, np.ndarray)):
+    if isinstance(ext, (collections.abc.Sequence, np.ndarray)):
         extclip = ext[mask]
     elif isinstance(ext, dict):
         if not silent:
@@ -255,7 +255,7 @@ def rvoginv(gamma, phi, inc, kz, ext=None, tdf=None, mu=0.0, rngslope=0.0,
         extclip = None
     elif ext is not None:
         extclip = np.ones(gammaclip.shape, dtype='float32') * ext
-    elif isinstance(tdf, (collections.Sequence, np.ndarray)):
+    elif isinstance(tdf, (collections.abc.Sequence, np.ndarray)):
         tdfclip = tdf[mask]
     elif isinstance(tdf, dict):
         if not silent:

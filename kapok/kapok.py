@@ -223,7 +223,7 @@ class Scene(object):
             kz (array): Array of kz values.
                 
         """
-        if not isinstance(bl, (collections.Sequence, np.ndarray)):
+        if not isinstance(bl, (collections.abc.Sequence, np.ndarray)):
             bl = mb_tr_index(bl)
             
         if (bl is None) or (bl[0] >= self.num_tracks) or (bl[1] >= self.num_tracks):
@@ -396,7 +396,7 @@ class Scene(object):
             result.attrs['desc'] = desc 
         
         # Perform Model Inversion...
-        if isinstance(bl, (collections.Sequence, np.ndarray)):
+        if isinstance(bl, (collections.abc.Sequence, np.ndarray)):
             if 'rvog' not in method:
                 print('kapok.Scene.inv | Multiple baselines selected for inversion, but model is not set to "rvog".  Currently, multi-baseline inversion is only supported for the RVoG model.  Aborting.')
                 return None
@@ -432,7 +432,7 @@ class Scene(object):
             result['hv'].attrs['units'] = 'm'
             
             # Create TDF dataset, if TDF varies across image.
-            if isinstance(tdf, (collections.Sequence, np.ndarray)):
+            if isinstance(tdf, (collections.abc.Sequence, np.ndarray)):
                 result.create_dataset('tdf', data=tdf, dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
                 result['tdf'].attrs['fixed'] = True
                 result['tdf'].attrs['name'] = 'Temporal Decorrelation Factor'
@@ -489,7 +489,7 @@ class Scene(object):
                     
                 # Create epsilon dataset, if epsilon varies across the image.
                 # Otherwise, store it in an attribute.
-                if isinstance(epsilon, (collections.Sequence, np.ndarray)):
+                if isinstance(epsilon, (collections.abc.Sequence, np.ndarray)):
                     result.create_dataset('epsilon', data=epsilon, dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
                     result['epsilon'].attrs['fixed'] = True
                     result['epsilon'].attrs['name'] = 'Epsilon'
@@ -498,7 +498,7 @@ class Scene(object):
                     result.attrs['epsilon'] = epsilon
                     
                 # Create TDF dataset, if TDF varies across image.
-                if isinstance(tdf, (collections.Sequence, np.ndarray)):
+                if isinstance(tdf, (collections.abc.Sequence, np.ndarray)):
                     if np.any(np.iscomplex(tdf)):
                         result.create_dataset('tdf', data=tdf, dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
                     else:
@@ -515,7 +515,7 @@ class Scene(object):
             import kapok.rvog
             import kapok.topo
             
-            if isinstance(bl, (collections.Sequence, np.ndarray)):
+            if isinstance(bl, (collections.abc.Sequence, np.ndarray)):
                 bl = np.sort(bl)
                 kz = np.zeros((len(bl),self.dim[0],self.dim[1]),dtype='float32')
                 for m, n in enumerate(bl):
@@ -552,7 +552,7 @@ class Scene(object):
                 print('kapok.Scene.inv | Run phase diversity coherence optimization before performing RVoG inversion.  Aborting.')
                 result = None
             else:
-                if isinstance(bl, (collections.Sequence, np.ndarray)):
+                if isinstance(bl, (collections.abc.Sequence, np.ndarray)):
                     ground, groundalt, volindex = kapok.topo.groundsolver(gamma, kz=kz, groundmag=groundmag, returnall=True)
                     coh_high = np.where(volindex,gamma[1],gamma[0])
                     hv, exttdf, converged = kapok.rvog.rvoginv(coh_high, ground, self.inc, kz, ext=ext, tdf=tdf, mu=mu, rngslope=rngslope,
@@ -573,7 +573,7 @@ class Scene(object):
     
                 result.attrs['model'] = 'rvog'
                 result.attrs['baseline'] = bl
-                if isinstance(bl, (collections.Sequence, np.ndarray)):
+                if isinstance(bl, (collections.abc.Sequence, np.ndarray)):
                     result.attrs['baseline_selection'] = blcriteria
                 else:
                     result.attrs['baseline_selection'] = 'Single Baseline'
@@ -587,7 +587,7 @@ class Scene(object):
                 result['ground'].attrs['units'] = ''
                 
                 # Save Extinction
-                if (ext is not None) and isinstance(ext, (collections.Sequence, np.ndarray)):
+                if (ext is not None) and isinstance(ext, (collections.abc.Sequence, np.ndarray)):
                     result.create_dataset('ext', data=ext, dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
                     result['ext'].attrs['fixed'] = True
                     result['ext'].attrs['name'] = 'Extinction'
@@ -601,7 +601,7 @@ class Scene(object):
                     result.attrs['ext'] = ext
                     
                 # Save TDF
-                if (tdf is not None) and isinstance(tdf, (collections.Sequence, np.ndarray)):
+                if (tdf is not None) and isinstance(tdf, (collections.abc.Sequence, np.ndarray)):
                     if np.any(np.iscomplex(tdf)):
                         result.create_dataset('tdf', data=tdf, dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
                     else:
@@ -627,7 +627,7 @@ class Scene(object):
         # Create groundmag dataset, if groundmag varies across the image.
         # Otherwise, store it in an attribute.
         if (method == 'sincphase') or (method == 'rvog'):
-            if isinstance(groundmag, (collections.Sequence, np.ndarray)):
+            if isinstance(groundmag, (collections.abc.Sequence, np.ndarray)):
                 result.create_dataset('groundmag', data=groundmag, dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
                 result['groundmag'].attrs['fixed'] = True
                 result['groundmag'].attrs['name'] = 'Ground Coherence Magnitude'
@@ -987,7 +987,7 @@ class Scene(object):
             else:
                 print('kapok.Scene.show | Unrecognized image type: "'+str(imagetype)+'".  Aborting.')
                 
-        elif isinstance(imagetype, (collections.Sequence, np.ndarray)):
+        elif isinstance(imagetype, (collections.abc.Sequence, np.ndarray)):
             cmap = 'viridis' if cmap is None else cmap
             kapok.vis.show_linear(imagetype, vmin=vmin, vmax=vmax, bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile, **kwargs)
             
@@ -1202,7 +1202,7 @@ class Scene(object):
                 coh = self.pdcoh[bl,1,pix[0],pix[1]]
             else:
                 coh = self.pdcoh[1,pix[0],pix[1]]
-        elif not isinstance(pol, (collections.Sequence, np.ndarray)) and (pol in range(self.num_pol)):
+        elif not isinstance(pol, (collections.abc.Sequence, np.ndarray)) and (pol in range(self.num_pol)):
             i,j = mb_cov_index(bl, pol=pol, pol2=polb, n_pol=self.num_pol)
             if (pix is None) and (bounds is None):
                 coh = self.cov[:,:,i,j] / np.sqrt(np.abs(self.cov[:,:,i,i]*self.cov[:,:,j,j]))
@@ -1210,7 +1210,7 @@ class Scene(object):
                 coh = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i,j] / np.sqrt(np.abs(self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i,i]*self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],j,j]))                
             else:
                 coh = self.cov[pix[0],pix[1],i,j] / np.sqrt(np.abs(self.cov[pix[0],pix[1],i,i]*self.cov[pix[0],pix[1],j,j]))
-        elif isinstance(pol, (collections.Sequence, np.ndarray)) and (len(pol) == self.num_pol):
+        elif isinstance(pol, (collections.abc.Sequence, np.ndarray)) and (len(pol) == self.num_pol):
             i,j = mb_cov_index(bl, pol=0, n_pol=self.num_pol)
             
             if (pix is None) and (bounds is None):
