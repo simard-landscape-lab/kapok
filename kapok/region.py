@@ -285,7 +285,7 @@ def rvogregion(scene=None, az=None, rng=None, bl=0, reg=0.0):
     
     # Set up parameters and starting RVoG modelled coherences.   
     hv = 20.0
-    hv_vector = np.linspace(1, hv, num=hv)
+    hv_vector = np.linspace(1, hv, num=int(hv))
     ext = 0.35
     mu_high = 0
     mu_low = 0.5
@@ -325,7 +325,7 @@ def rvogregion(scene=None, az=None, rng=None, bl=0, reg=0.0):
     # Update Function Called When Sliders Are Changed
     def update(val):
         hv = slidehv.val
-        hv_vector = np.linspace(0.01, hv, num=hv)
+        hv_vector = np.linspace(0.01, hv, num=int(hv))
         ext = slideext.val
         mu_low = slidemulow.val
         alpha = slidealpha.val
