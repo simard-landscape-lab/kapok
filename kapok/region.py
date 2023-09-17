@@ -308,10 +308,10 @@ def rvogregion(scene=None, az=None, rng=None, bl=0, reg=0.0):
     
     # UI Sliders
     axcolor = 'lightgoldenrodyellow'
-    axhv = plt.axes([0.25, 0.20, 0.5, 0.02], axisbg=axcolor)
-    axext = plt.axes([0.25, 0.15, 0.5, 0.02], axisbg=axcolor)
-    axmulow = plt.axes([0.25, 0.1, 0.5, 0.02], axisbg=axcolor)
-    axalpha  = plt.axes([0.25, 0.05, 0.5, 0.02], axisbg=axcolor)
+    axhv = plt.axes([0.25, 0.20, 0.5, 0.02], facecolor=axcolor)
+    axext = plt.axes([0.25, 0.15, 0.5, 0.02], facecolor=axcolor)
+    axmulow = plt.axes([0.25, 0.1, 0.5, 0.02], facecolor=axcolor)
+    axalpha  = plt.axes([0.25, 0.05, 0.5, 0.02], facecolor=axcolor)
     
     slidehv = widgets.Slider(axhv, 'hv (m)', 1, 50.0, valinit=hv)
     sliders.append(slidehv)
