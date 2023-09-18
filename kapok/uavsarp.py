@@ -33,7 +33,7 @@ import h5py
 from scipy.ndimage.interpolation import zoom
 
 import kapok
-from kapok.lib import mlook, smooth, sch2enu
+from kapok.lib import mlook, smooth, sch2enu, llh2enu
 
 
 def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
