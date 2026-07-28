@@ -4,8 +4,12 @@
 
 """
 from .coords import *
+from .gdal import *
 from .interp import *
 from .matrix import *
 from .mb import *
 from .slope import *
 from .win import *
+
+# import pyximport; pyximport.install(setup_args={"include_dirs":np.get_include()})
+# from .matrixc import *

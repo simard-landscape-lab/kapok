@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """Geocoding Module
 
-    Use GDAL to make output products resampled to geographic projection with
+    Functions to export output products resampled to geographic projection with
     constant lat/lon spacing.
-    
+
     Authors: Brian Hawkins, Michael Denbina
-	
+
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -21,9 +21,9 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-    
 
-    
+
+
 """
 import os
 import subprocess
@@ -35,11 +35,11 @@ try:
 except ImportError:
     pass
 
-from kapok.lib import bilinear_interpolate
+from kapok.lib import bilinear_interpolate, nearest_interpolate
 
 
 
-def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
+def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='GTiff',
                 nodataval=None, tr=2.7777778e-4, **kwargs):
     """Create a geocoded file, in geographic projection, from input data
     in azimuth, slant range radar coordinates.
@@ -48,7 +48,7 @@ def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
     of each pixel (geolocation arrays), in order to perform the resampling
     using the pyresample Python library
     (https://pypi.python.org/pypi/pyresample).
-    
+
     Author: Brian Hawkins
 
     Arguments:
@@ -78,7 +78,7 @@ def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
     """
     if nodataval is None:
         nodataval = 0.0
-        
+
     if sys.byteorder == 'little':
         byte = 'LSB'
     else:
@@ -105,8 +105,8 @@ def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
     pad = 10.5
     ilat0 = int(lat0/dlat + pad)
     ilat1 = int(lat1/dlat - pad)
-    ilon0 = int(lon0/dlat - pad)
-    ilon1 = int(lon1/dlat + pad)
+    ilon0 = int(lon0/dlon - pad)
+    ilon1 = int(lon1/dlon + pad)
     nlat = ilat0 - ilat1
     nlon = ilon1 - ilon0
     lat0 = ilat0 * dlat
@@ -138,6 +138,10 @@ def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
     # Careful, these routines can promote floats to doubles.
     outdata = out.astype('f4')
     outfile = outpath + 'out.dat'
+    if nodataval is not None:
+        if np.any(~np.isfinite(outdata)):
+            outdata[~np.isfinite(outdata)] = nodataval
+
     with open(outfile, 'w') as f:
         outdata.tofile(f)
 
@@ -169,6 +173,8 @@ def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
 
     # Call GDAL
     command = 'gdal_translate -ot Float32 -of ' + outformat
+    if outformat == 'GTiff':
+        command = command + ' -co "COMPRESS=LZW"'
     if nodataval is not None:
         command = command + ' -a_nodata '+str(nodataval)
     command = ' '.join((command, vrtname, outpath+datafile))
@@ -179,22 +185,22 @@ def radar2ll_pr(outpath, datafile, data, lat, lon, outformat='ENVI',
     os.remove(vrtname)
     if 'VRT' not in outformat.upper():
         os.remove(outfile)
-    
+
     return
 
 
-def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
+def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='GTiff',
                   resampling='bilinear', nodataval=None, tr=2.7777778e-4):
     """Create a geocoded file, in geographic projection, from input data
     in azimuth, slant range radar coordinates.
-    
+
     Uses latitude and longitude arrays containing the geographic coordinates
     of each pixel (geolocation arrays), in order to perform the resampling
     using gdalwarp.  For gdalwarp reference, see
     http://www.gdal.org/gdalwarp.html.
-    
+
     Author: Michael Denbina
-    
+
     Arguments:
         outpath (str): The path in which to save the geocoded file, as well as
             temporary latitude/longitude files used during the resampling
@@ -209,8 +215,8 @@ def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
         lon (array): 2D array containing the longitudes for each pixel, in
             degrees.
         outformat (str): The output format.  Should be an identifying string
-            recognized by GDAL.  Default is 'ENVI'.  Other options include
-            'GTiff' or 'KEA', etc.  For reference, see
+            recognized by GDAL.  Default is 'GTiff'.  Other options include
+            'ENVI' or 'KEA', etc.  For reference, see
             http://www.gdal.org/formats_list.html.
         resampling (str): String identifying the resampling method.  Options
             include 'near', 'bilinear', 'cubic', 'lanczos', and others.
@@ -224,29 +230,29 @@ def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
             Can be set to None in order for gdalwarp to automatically choose
             an output resolution based on input data spacing.
             Default: 2.7777778e-4 (1 arc second).
-    
-    """   
+
+    """
     if sys.byteorder == 'little':
         byte = 'LSB'
     else:
         byte = 'MSB'
-        
+
     if outpath != '':
-        outpath = outpath + '/'        
-        
+        outpath = outpath + '/'
+
     # Save the lat/lon to temporary flat binary files.
     lat.tofile(outpath+'templat.dat')
     lon.tofile(outpath+'templon.dat')
-    
+
     # Save the data file.
     data = data.astype('float32')
     data.tofile(outpath+'tempdata.dat')
-    
+
     # Raster properties.
     xsize = int(data.shape[1])
     ysize = int(data.shape[0])
     lineoffset = xsize*4
-    
+
     # Create the lat/lon .vrts.
     outfile = outpath+'templat.vrt'
     with open(outfile, "w") as hdr:
@@ -259,7 +265,7 @@ def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
         hdr.write('    <ByteOrder>'+byte+'</ByteOrder>\n')
         hdr.write('  </VRTRasterBand>\n')
         hdr.write('</VRTDataset>\n')
-        
+
     outfile = outpath+'templon.vrt'
     with open(outfile, "w") as hdr:
         hdr.write('<VRTDataset rasterXSize="'+str(xsize)+'" rasterYSize="'+str(ysize)+'">\n')
@@ -271,8 +277,8 @@ def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
         hdr.write('    <ByteOrder>'+byte+'</ByteOrder>\n')
         hdr.write('  </VRTRasterBand>\n')
         hdr.write('</VRTDataset>\n')
-        
-        
+
+
     # Create the data file vrt.
     outfile = outpath+'tempdata.vrt'
     with open(outfile, "w") as hdr:
@@ -295,28 +301,31 @@ def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
         hdr.write('    <ByteOrder>'+byte+'</ByteOrder>\n')
         hdr.write('  </VRTRasterBand>\n')
         hdr.write('</VRTDataset>\n')
-        
-        
+
+
     # Call gdalwarp:
     command = 'gdalwarp -overwrite -geoloc -t_srs EPSG:4326 -ot Float32 -r ' + resampling + ' -of ' + outformat
 
     if nodataval is not None:
         command = command + ' -dstnodata '+str(nodataval)
 
+    if outformat == 'GTiff':
+        command = command + ' -co "COMPRESS=LZW"'
+
     if tr is not None:
         if isinstance(tr, tuple):
             command = command + ' -tr '+str(tr[0])+' '+str(tr[1])
         else:
             command = command + ' -tr '+str(tr)+' '+str(tr)
-        
-    
+
+
     command = command + ' ' + outpath + 'tempdata.vrt ' + outpath + datafile
-    
-    
+
+
     print(command)
     print(subprocess.getoutput(command))
-    
-    
+
+
     # Remove temporary files.
     os.remove(outpath+'templat.dat')
     os.remove(outpath+'templat.vrt')
@@ -324,17 +333,17 @@ def radar2ll_gdal(outpath, datafile, data, lat, lon, outformat='ENVI',
     os.remove(outpath+'templon.vrt')
     os.remove(outpath+'tempdata.dat')
     os.remove(outpath+'tempdata.vrt')
-    
+
     return
 
 
-def ll2radar(data, origin, spacing, lat, lon):
+def ll2radar(data, origin, spacing, lat, lon, interp='bilinear'):
     """Convert an array in geographic (lat,lon) coordinates into a
     corresponding array in the (azimuth, slant range) coordinates of the
     radar image.
-    
+
     Author: Michael Denbina
-    
+
     Arguments:
         data (array): 2D array containing data in regularly spaced latitude/
             longitude coordinates.  First dimension of array should be
@@ -347,19 +356,26 @@ def ll2radar(data, origin, spacing, lat, lon):
             for each pixel of the radar image.
         lon (array): 2D array containing the longitude values, in degrees,
             for each pixel of the radar image.
-            
+        interp (str): Set to 'nearest' to use nearest neighbor interpolation,
+            or 'bilinear' to use bilinear interpolation (default).
+
     Returns:
         resdata (array): Data resampled to radar coordinates, with the same
             size as lat and lon.
 
-    """               
-    x = (lon - origin[1])/spacing[1]
-    y = (lat - origin[0])/spacing[0]
-    
+    """
+    x = (lon - origin[1]) / spacing[1]
+    y = (lat - origin[0]) / spacing[0]
+
+    if interp == 'nearest':
+        interp_func = nearest_interpolate
+    else:
+        interp_func = bilinear_interpolate
+
     if np.any(np.imag(data) != 0): # if data is complex, interpolate real and imaginary parts separately
-        resdata = 1j*bilinear_interpolate(np.imag(data),x,y)
-        resdata += bilinear_interpolate(np.real(data),x,y)
+        resdata = 1j*interp_func(np.imag(data),x,y)
+        resdata += interp_func(np.real(data),x,y)
     else: # data is real
-        resdata = bilinear_interpolate(data,x,y)
-        
+        resdata = interp_func(data,x,y)
+
     return resdata

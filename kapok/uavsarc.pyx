@@ -1,25 +1,25 @@
 # -*- coding: utf-8 -*-
 # cython: language_level=3
 """UAVSAR Data Import Cython Functions
-    
+
     Module for importing UAVSAR data.  These are Cython functions imported by
     the main kapok.uavsar module.
-    
+
     Author: Michael Denbina
-    
-    Copyright 2016 California Institute of Technology.  All rights reserved.
+
+    Copyright 2016-2023 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
-    
+
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
-    
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
-    
+
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
@@ -42,17 +42,18 @@ np.import_array()
 np.import_ufunc()
 
 
-def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
+def load(infile, outfile=None, mlwin=(20,5), smwin=(1,1), azbounds=None,
          rngbounds=None, tracks=None, compression='gzip',
          compression_opts=4, num_blocks=20, kzcalc=False, kzvertical=True,
-         overwrite=False):
+         tomocal=False, overwrite=False):
     """Load a UAVSAR dataset into the Kapok format, and save it to target HDF5
     file.
-    
+
     Arguments:
         infile (str): Path and filename of a UAVSAR .ann file containing the
             metadata for a UAVSAR SLC stack.
         outfile (str): Path and filename for the saved HDF5 dataset.
+            Default: Same as input annotation file, but ends in "_kapok.h5".
         mlwin: Tuple containing the multilooking window sizes in azimuth and
             slant range (in that order).  div=(12,3) results in multilooking
             using a window of 12 pixels in azimuth and 3 pixels in slant range.
@@ -107,12 +108,16 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
             if the .kz files cannot be found, as the kz values calculated by
             this function are always for the vertical direction.
             Default: True.
+        tomocal (bool): Set to True to load TomoSAR phase calibrated data,
+            which will have SLCs with filenames of the form "_tomo.slc".  Any
+            multi-segment SLC stacks will have single segment files after
+            TomoSAR calibration.
         overwrite (bool): Set to True to overwrite an existing Kapok HDF5
             file if necessary.  Default: False.
-            
+
     Returns:
         scene: A Kapok scene object pointing to the newly created HDF5 file.
-    
+
     """
     # Load the annotation file.
     try:
@@ -120,89 +125,121 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
     except:
         print('kapok.uavsar.load | Cannot load UAVSAR annotation file. Aborting.')
         return
-    
-    
+
+
     # Create the HDF5 file.
-    if overwrite:
+    if outfile is None:
+        outfile = os.path.splitext(infile)[0] + '_kapok.h5'
+
+    if os.path.isfile(outfile) and not overwrite:
+        print('kapok.uavsar.load | Target HDF5 file already exists.  Loading existing data.')
+        return kapok.Scene(outfile)
+    elif overwrite:
         try:
             f = h5py.File(outfile,'w')
         except:
             print('kapok.uavsar.load | Cannot create new HDF5 file. Check if path is valid. Aborting.')
-            return    
+            return
     else:
         try:
             f = h5py.File(outfile,'x')
         except:
             print('kapok.uavsar.load | Cannot create new HDF5 file. Check if path is valid and ensure file does not already exist. Aborting.')
             return
-    
-       
+
+
     cdef unsigned int n, tr
-    
+
     # Get SLC dimensions and number of segments.
-    rngsize_slc = ann.query('slc_1_1x1 Columns')
+    rngsize_slc = int(ann.query('slc_1_1x1 Columns'))
+    rngsize_2x8 = int(ann.query('slc_1_2x8 Columns'))
     num_segments = ann.query('Number of Segments')
     if num_segments > 1:
         azsize_slc = np.zeros(num_segments,dtype='int32')
+        azsize_2x8 = np.zeros(num_segments,dtype='int32')
         for n in range(num_segments):
             azsize_slc[n] = ann.query('slc_'+str(n+1)+'_1x1 Rows')
+            azsize_2x8[n] = ann.query('slc_'+str(n+1)+'_2x8 Rows')
     else:
-        azsize_slc = ann.query('slc_1_1x1 Rows')
+        azsize_slc = int(ann.query('slc_1_1x1 Rows'))
+        azsize_2x8 = int(ann.query('slc_1_2x8 Rows'))
     
+
+    # If loading TomoSAR phase calibrated data, the number of segments will be 1 regardless of the annotation file.
+    if tomocal:
+        num_segments = 1
+        azsize_slc = np.sum(azsize_slc)
+        azsize_2x8 = np.sum(azsize_2x8)
     
+
     # Get track filenames and number of tracks.
     temp = ann.query('stackline1')
+
+    if 'L090' in temp:
+        band = 'L'
+    elif 'P090' in temp:
+        band = 'P'
+
     num = 1
     if temp is not None:
-        tracknames = [temp.split('_L090')[0]]
+        tracknames = [temp.split('_{0}090'.format(band))[0]]
         num += 1
         temp = ann.query('stackline'+str(num))
         while temp is not None:
-            tracknames.append(temp.split('_L090')[0])
+            tracknames.append(temp.split('_{0}090'.format(band))[0])
             num += 1
             temp = ann.query('stackline'+str(num))
     else:
         print('kapok.uavsar.load | Cannot find track names in UAVSAR annotation file.  Aborting.')
         return
-        
+    
+
+    # Check if data is BC or BU:
+    if 'BC' in ann.query('slc_1_1x1'):
+        bc_str = 'BC'
+    else:
+        bc_str = 'BU'
+    
 
     # Subset track names if desired tracks were specified:
     tracknames = np.array(tracknames)
     if tracks is not None:
         tracks = np.array(tracks,dtype='int')
         tracknames = tracknames[tracks]
-        
+
     num_tracks = len(tracknames) # Number of Tracks
     num_bl = int(num_tracks * (num_tracks-1) / 2) # Number of Baselines
     num_pol = int(3) # Number of Polarizations (HH, sqrt(2)*HV, VV)
     num_cov_elements = num_tracks*num_pol # Number of Covariance Matrix Elements in Each Row
 
-    f.attrs['stack_name'] = ann.query('Stack Name')    
+    f.attrs['stack_name'] = ann.query('Stack Name')
     f.attrs['site'] = ann.query('Site Description')
     f.attrs['url'] = ann.query('URL')
     f.attrs['sensor'] = 'UAVSAR'
     f.attrs['processor'] = 'production'
-    
+    f.attrs['band'] = band
+
     print('kapok.uavsar.load | Stack ID: '+f.attrs['stack_name'])
     print('kapok.uavsar.load | Site Description: '+f.attrs['site'])
     print('kapok.uavsar.load | URL: '+f.attrs['url'])
-    
+    print('kapok.uavsar.load | UAVSAR Band Designation: '+f.attrs['band'])
+
     print('kapok.uavsar.load | Importing metadata. ('+time.ctime()+')')
-    
+
     f.attrs['average_altitude'] = ann.query('Average Altitude')
     f.attrs['image_starting_slant_range'] = ann.query('Image Starting Slant Range')*1000
     f.attrs['slc_azimuth_pixel_spacing'] = ann.query('1x1 SLC Azimuth Pixel Spacing')
     f.attrs['slc_slant_range_pixel_spacing'] = ann.query('1x1 SLC Range Pixel Spacing')
     f.attrs['cov_azimuth_pixel_spacing'] = ann.query('1x1 SLC Azimuth Pixel Spacing') * mlwin[0]
     f.attrs['cov_slant_range_pixel_spacing'] = ann.query('1x1 SLC Range Pixel Spacing') * mlwin[1]
-    
+
     f.attrs['num_tracks'] = num_tracks
     f.attrs['num_baselines'] = num_bl
     f.attrs['tracks'] = np.array(tracknames,dtype='S')
-    
+
     f.attrs['compression'] = compression
     f.attrs['compression_opts'] = compression_opts
-    
+
     # Get SCH Peg from Annotation File
     peglat = ann.query('Peg Latitude')
     peglon = ann.query('Peg Longitude')
@@ -210,54 +247,54 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
     f.attrs['peg_latitude'] = peglat
     f.attrs['peg_longitude'] = peglon
     f.attrs['peg_heading'] = peghdg
-    
+
     # Save in attributes as degrees, but convert to radians for coordinate transformation functions.
     peglat = np.radians(peglat)
     peglon = np.radians(peglon)
     peghdg = np.radians(peghdg)
-    
+
     if (azbounds is not None) or (rngbounds is not None):
         f.attrs['subset'] = True
     else:
         f.attrs['subset'] = False
-    
-    
+
+
     # Check azimuth bounds for validity.
     if azbounds is None:
         azbounds = [0,np.sum(azsize_slc)]
-        
+
     if azbounds[1] <= azbounds[0]:
         print('kapok.uavsar.load | Invalid azimuth bounds.  Must be ascending.  Aborting.')
         return
-        
+
     if azbounds[0] < 0:
         print('kapok.uavsar.load | Lower azimuth bound ('+str(azbounds[0])+') is less than zero.  Setting lower azimuth bound to zero.')
         azbounds[0] = 0
-        
+
     if azbounds[1] > np.sum(azsize_slc):
         print('kapok.uavsar.load | Upper azimuth bound ('+str(azbounds[1])+') greater than number of SLC lines ('+str(azsize_slc)+').')
         print('kapok.uavsar.load | Setting upper azimuth bound to '+str(azsize_slc)+'.')
         azbounds[1] = np.sum(azsize_slc)
-        
-        
+
+
     # Check range bounds for validity.
     if rngbounds is None:
         rngbounds = [0,rngsize_slc]
-        
+
     if rngbounds[1] <= rngbounds[0]:
         print('kapok.uavsar.load | Invalid range bounds.  Must be ascending.  Aborting.')
         return
-        
+
     if rngbounds[0] < 0:
         print('kapok.uavsar.load | Lower range bound ('+str(rngbounds[0])+') is less than zero.  Setting lower azimuth bound to zero.')
         rngbounds[0] = 0
-        
+
     if rngbounds[1] > rngsize_slc:
         print('kapok.uavsar.load | Upper range bound ('+str(rngbounds[1])+') greater than number of SLC columns ('+str(rngsize_slc)+').')
         print('kapok.uavsar.load | Setting upper range bound to '+str(rngsize_slc)+'.')
         rngbounds[1] = rngsize_slc
-    
-    
+
+
     # Multi-looked, subsetted, image dimensions:
     azsize = (azbounds[1]-azbounds[0]) // mlwin[0]
     rngsize = (rngbounds[1]-rngbounds[0]) // mlwin[1]
@@ -272,34 +309,50 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
     datapath = os.path.dirname(infile)
     if datapath != '':
         datapath = datapath + '/'
-    
+
     # Get filenames of SLCs for each track, in polarization order HH, HV, VV.
     slcfiles = []
     for seg in range(num_segments):
         for tr in range(num_tracks):
             for pol in ['HH','HV','VV']:
-                file = glob(datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc')
+                slc_pattern = datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc'
+                if tomocal:
+                    slc_pattern = datapath+tracknames[tr]+'*'+pol+'_*_1x1_tomo.slc'
+                    if tr == 0:
+                        slc_pattern = datapath+tracknames[tr]+'*'+pol+'_*_{}_1x1.slc'.format(bc_str)
                 
-                if len(file) == 1:            
+                file = glob(slc_pattern)
+
+                if len(file) == 1:
                     slcfiles.append(file[0])
                 elif len(file) > 1:
-                    print('kapok.uavsar.load | Too many SLC files matching pattern: "'+datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc'+'".  Aborting.')
+                    print('kapok.uavsar.load | Too many SLC files matching pattern: "'+slc_pattern+'".  Aborting.')
                     return
                 else:
-                    print('kapok.uavsar.load | Cannot find SLC file matching pattern: "'+datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc'+'".  Aborting.')
-                    if seg > 0:
-                        print('kapok.uavsar.load | Please ensure that you downloaded all segments of the data from the UAVSAR download page by using the "Segment 1", "Segment 2", etc., radio buttons.')
-                    return
-    
-    
+                    print('kapok.uavsar.load | Cannot find SLC file matching pattern: "'+slc_pattern+'".  Aborting.')
+                    if tomocal:
+                        slc_pattern = datapath+tracknames[tr]+'*'+pol+'_*_{}_1x1.slc'.format(bc_str)
+                        file = glob(slc_pattern)
+                        if len(file) == 1:
+                            print('kapok.uavsar.load | Fell back to non-tomocal SLC matching pattern: "'+slc_pattern+'".')
+                            slcfiles.append(file[0])
+                        else:
+                            print('kapok.uavsar.load | Cannot find SLC file matching pattern: "'+slc_pattern+'".  Aborting.')
+                            return
+                    else:
+                        if seg > 0:
+                            print('kapok.uavsar.load | Please ensure that you downloaded all segments of the data from the UAVSAR download page by using the "Segment 1", "Segment 2", etc., radio buttons.')
+                        return
+
+
     # Initialize covariance matrix dataset in HDF5 file:
     cov = f.create_dataset('cov', (azsize, rngsize, num_cov_elements, num_cov_elements), dtype='complex64', compression=compression, shuffle=True, compression_opts=compression_opts)
-    
-    
+
+
     # Calculate covariance matrix.
     az_vector = np.round(np.linspace(0, azsize, num=num_blocks+1)).astype('int')
     az_vector[num_blocks] = azsize
-    
+
     cdef unsigned int seg_start, seg_end, row, col
     cdef unsigned long azstart, azend, azstart_slc, azend_slc, azoffset_start, azoffset_end
 
@@ -309,24 +362,24 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
         azend_slc = azend*mlwin[0] + azbounds[0]
         seg_start, azoffset_start = findsegment(azstart_slc, azsize_slc)
         seg_end, azoffset_end = findsegment(azend_slc, azsize_slc)
-        
+
         print('kapok.uavsar.load | Calculating covariance matrix for rows '+str(azstart)+'-'+str(azend-1)+' / '+str(azsize-1)+' ('+str(np.round(azstart/azsize*100))+'%). ('+time.ctime()+')')
-        
+
         for slcnum in range(0,num_cov_elements):
             print('kapok.uavsar.load | Loading SLCs: '+str(slcnum+1)+'/'+str(num_cov_elements)+'. ('+time.ctime()+')     ', end='\r')
             file = slcfiles[slcnum+(seg_start*num_cov_elements)]
-            
+
             if seg_start == seg_end:
                 slc = getslcblock(file, rngsize_slc, azoffset_start, azoffset_end, rngbounds=rngbounds)
             else:
                 file2 = slcfiles[slcnum+(seg_end*num_cov_elements)]
                 slc = getslcblock(file, rngsize_slc, azoffset_start, azoffset_end, rngbounds=rngbounds, file2=file2, azsize=azsize_slc[seg_start])
-                
+
             slc[np.abs(slc) < 1e-5] = 1e-5 # Don't want zero-valued pixels.  Set floor to -100 dB.
-                
+
             if slcnum == 0:
                 slcstack = np.zeros((num_cov_elements,slc.shape[0],slc.shape[1]),dtype='complex64')
-                
+
                 if (slcnum % 3) == 1: # HV Polarization
                     slcstack[slcnum] = np.sqrt(2)*slc
                 else: # HH or VV Polarization
@@ -336,53 +389,61 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
                     slcstack[slcnum] = np.sqrt(2)*slc
                 else:  # HH or VV Polarization
                     slcstack[slcnum] = slc
-            
-            
+
+
         for row in range(0,num_cov_elements):
             for col in range(row,num_cov_elements):
                 print('kapok.uavsar.load | Calculating matrix element: ('+str(row)+','+str(col)+'). ('+time.ctime()+')     ', end='\r')
                 cov[azstart:azend,:,row,col] = mlook(slcstack[row]*np.conj(slcstack[col]),mlwin)
-    
-    
+
+
     del slcstack
     f.flush()
-    
+
     # Boxcar Smoothing:
     if smwin != (1,1):
         print('kapok.uavsar.load | Boxcar averaging covariance matrix. ('+time.ctime()+')')
         for row in range(0,num_cov_elements):
             for col in range(row,num_cov_elements):
                 cov[:,:,row,col] = smooth(cov[:,:,row,col],smwin)
-    
+
     cov.attrs['description'] = 'Covariance Matrix'
     cov.attrs['basis'] = 'lexicographic'
     cov.attrs['num_pol'] = 3
     cov.attrs['pol'] = np.array(['HH', 'sqrt(2)*HV', 'VV'],dtype='S')
     print('kapok.uavsar.load | Covariance matrix calculation complete. ('+time.ctime()+')     ')
-    
-    
+
+
     # Load LLH files.
     llh = None
     mlwin_lkv = (int(ann.query('Number of Azimuth Looks in 2x8 SLC')), int(ann.query('Number of Range Looks in 2x8 SLC')))
-    
+
     for seg in range(num_segments):
         llhname = ann.query('llh_'+str(seg+1)+'_2x8')
-        file = glob(datapath+llhname)
-        
+        llh_pattern = datapath+llhname
+        if tomocal:
+            llh_pattern = llh_pattern.replace('_s1','')
+
+        file = glob(llh_pattern)
+
         if len(file) == 1:
             llh_rows = int(ann.query('llh_'+str(seg+1)+'_2x8 Rows'))
             llh_cols = int(ann.query('llh_'+str(seg+1)+'_2x8 Columns'))
+            if tomocal:
+                llh_rows = azsize_2x8
+                llh_cols = rngsize_2x8
+            
             if llh is None:
                 llh = np.memmap(file[0], dtype='float32', mode='r', shape=(llh_rows, llh_cols, 3))
             else:
                 llh = np.vstack((llh, np.memmap(file[0], dtype='float32', mode='r', shape=(llh_rows, llh_cols, 3))))
         elif len(file) > 1:
-            print('kapok.uavsar.load | Too many LLH files matching pattern: "'+datapath+llhname+'".  Aborting.')
+            print('kapok.uavsar.load | Too many LLH files matching pattern: "'+llh_pattern+'".  Aborting.')
             return
         else:
-            print('kapok.uavsar.load | Cannot find LLH file matching pattern: "'+datapath+llhname+'".  Aborting.')
+            print('kapok.uavsar.load | Cannot find LLH file matching pattern: "'+llh_pattern+'".  Aborting.')
             return
-    
+
 
     # LLH Subset Bounds and Offsets for Trimming Multilooked Arrays
     azllhstart = azbounds[0] // mlwin_lkv[0]
@@ -390,20 +451,20 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
     azllhoffset = azbounds[0] % mlwin_lkv[0]
     if (azllhend < llh.shape[0]):
         azllhend += 1
-    
+
     rngllhstart = rngbounds[0] // mlwin_lkv[1]
     rngllhend = rngbounds[1] // mlwin_lkv[1]
     rngllhoffset = rngbounds[0] % mlwin_lkv[1]
     if (rngllhend < llh.shape[1]):
         rngllhend += 1
 
-    # Initialize latitude dataset and import values:   
-    print('kapok.uavsar.load | Importing latitude values. ('+time.ctime()+')')    
-    lat = f.create_dataset('lat', (azsize, rngsize), dtype='float32', compression=compression, compression_opts=compression_opts)   
+    # Initialize latitude dataset and import values:
+    print('kapok.uavsar.load | Importing latitude values. ('+time.ctime()+')')
+    lat = f.create_dataset('lat', (azsize, rngsize), dtype='float32', compression=compression, compression_opts=compression_opts)
     lat[:] = mlook(zoom(llh[azllhstart:azllhend,rngllhstart:rngllhend,0],mlwin_lkv),mlwin)[azllhoffset:(azllhoffset+azsize),rngllhoffset:(rngllhoffset+rngsize)]
     lat.attrs['units'] = 'degrees'
     lat.attrs['description'] = 'Latitude'
-    
+
     # Initialize longitude dataset and import values:
     print('kapok.uavsar.load | Importing longitude values. ('+time.ctime()+')')
     lon = f.create_dataset('lon', (azsize, rngsize), dtype='float32', compression=compression, compression_opts=compression_opts)
@@ -417,87 +478,95 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
     dem[:] = mlook(zoom(llh[azllhstart:azllhend,rngllhstart:rngllhend,2],mlwin_lkv),mlwin)[azllhoffset:(azllhoffset+azsize),rngllhoffset:(rngllhoffset+rngsize)]
     dem.attrs['units'] = 'meters'
     dem.attrs['description'] = 'Processor DEM'
-    
-    # Convert LLH to ENU coordinates.  Used to calculate platform position later. 
+
+    # Convert LLH to ENU coordinates.  Used to calculate platform position later.
     posmm = llh2enu(np.radians(llh[:,:,1]), np.radians(llh[:,:,0]), llh[:,:,2], peglat, peglon, peghdg)
-    
+
     f.flush()
     del llh
-    
-    
+
+
     # Load LKV files.
     lkvmm = None
     for seg in range(num_segments):
         lkvname = ann.query('lkv_'+str(seg+1)+'_2x8')
-        file = glob(datapath+lkvname)
+        lkv_pattern = datapath+lkvname
+        if tomocal:
+            lkv_pattern = lkv_pattern.replace('_s1','')
         
+        file = glob(lkv_pattern)
+
         if len(file) == 1:
             lkv_rows = int(ann.query('lkv_'+str(seg+1)+'_2x8 Rows'))
             lkv_cols = int(ann.query('lkv_'+str(seg+1)+'_2x8 Columns'))
+            if tomocal:
+                lkv_rows = azsize_2x8
+                lkv_cols = rngsize_2x8
+
             if lkvmm is None:
                 lkvmm = np.memmap(file[0], dtype='float32', mode='r', shape=(lkv_rows, lkv_cols, 3))
             else:
                 lkvmm = np.vstack((lkvmm, np.memmap(file[0], dtype='float32', mode='r', shape=(lkv_rows, lkv_cols, 3))))
         elif len(file) > 1:
-            print('kapok.uavsar.load | Too many LKV files matching pattern: "'+datapath+lkvname+'".  Aborting.')
+            print('kapok.uavsar.load | Too many LKV files matching pattern: "'+lkv_pattern+'".  Aborting.')
             return
         else:
-            print('kapok.uavsar.load | Cannot find LKV file matching pattern: "'+datapath+lkvname+'".  Aborting.')
-            return           
-            
-    
+            print('kapok.uavsar.load | Cannot find LKV file matching pattern: "'+lkv_pattern+'".  Aborting.')
+            return
+
+
     # Get sensor wavelength from annotation file.
     wavelength = ann.query('Center Wavelength')
     wavelength /= 100 # convert from cm to m
     f.attrs['wavelength'] = wavelength
-       
+
     # Starting S coordinate of SLCs, and S coordinate spacing (in meters).
     sstart = ann.query('slc_1_1x1_mag.row_addr')
     sspacing = ann.query('slc_1_1x1_mag.row_mult')
 
     # S Coordinate Bounds for Desired Subset:
     sbounds = azbounds*sspacing + sstart
-    
+
     # Calculate platform position from LLH and LKV:
     posmm = posmm - lkvmm
-    
-    
+
+
     # Incidence Angle Calculation for Reference Track
     print('kapok.uavsar.load | Calculating incidence angle values from reference track look vector. ('+time.ctime()+')')
     refvelocity = np.gradient(posmm, axis=0)
     refvelocity = refvelocity / (np.linalg.norm(refvelocity,axis=2)[:,:,np.newaxis])
-    
+
     proj_reflkv_v = np.sum(lkvmm*refvelocity,axis=2)[:,:,np.newaxis]*refvelocity
-    
+
     incident_lkv = lkvmm - proj_reflkv_v
     inc_ref = np.arccos(np.abs(incident_lkv[:,:,2])/np.linalg.norm(incident_lkv,axis=2))
-    
+
     # Initialize incidence angle dataset (stores reference track incidence angle):
     inc = f.create_dataset('inc', (azsize, rngsize), dtype='float32', compression=compression, compression_opts=compression_opts)
     inc.attrs['units'] = 'radians'
     inc.attrs['description'] = 'Reference Track Incidence Angle'
     inc[:] = mlook(zoom(inc_ref[azllhstart:azllhend,rngllhstart:rngllhend],mlwin_lkv),mlwin)[azllhoffset:(azllhoffset+azsize),rngllhoffset:(rngllhoffset+rngsize)]
-    del refvelocity, proj_reflkv_v, incident_lkv, inc_ref    
-    
-    
-    
+    del refvelocity, proj_reflkv_v, incident_lkv, inc_ref
+
+
+
     # Initialize kz dataset:
     kz = f.create_dataset('kz', (num_tracks, azsize, rngsize), dtype='float32', compression=compression, compression_opts=compression_opts)
     kz.attrs['units'] = 'radians/meter'
     kz.attrs['description'] = 'Interferometric Vertical Wavenumber'
     kz.attrs['indexing'] = 'track'
-    
-    
+
+
     # Static Typed Variables (for kz calculation)
     cdef np.ndarray[np.float64_t, ndim=3] lkv = np.array(lkvmm,dtype='float64')
     del lkvmm
-    
+
     cdef np.ndarray[np.float64_t, ndim=3] pos = np.array(posmm,dtype='float64')
     del posmm
-    
+
     cdef np.ndarray[np.float64_t, ndim=2] inc_buffer = np.zeros((mlwin[0],rngsize_slc),dtype='float64')
     cdef np.ndarray[np.float64_t, ndim=2] kz_buffer = np.zeros((mlwin[0],rngsize_slc),dtype='float64')
-    
+
     cdef np.ndarray[np.float64_t, ndim=3] tracklkv = np.zeros((mlwin[0],rngsize_slc,3),dtype='float64')
     cdef np.ndarray[np.float64_t, ndim=3] velocity = np.zeros((mlwin[0],rngsize_slc,3),dtype='float64')
     cdef np.ndarray[np.float64_t, ndim=3] lookcrossv = np.zeros((mlwin[0],rngsize_slc,3),dtype='float64')
@@ -506,13 +575,13 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
 
     cdef np.ndarray[np.float64_t, ndim=2] base_enu = np.zeros((azbounds[1]-azbounds[0],3),dtype='float64')
 
-    cdef np.ndarray[np.float64_t, ndim=2] baseline = np.zeros((mlwin[0],3),dtype='float64')    
+    cdef np.ndarray[np.float64_t, ndim=2] baseline = np.zeros((mlwin[0],3),dtype='float64')
     cdef np.ndarray[np.float64_t, ndim=2] baselinep = np.zeros((mlwin[0],rngsize_slc),dtype='float64')
     cdef np.ndarray[np.float64_t, ndim=2] baselinepsign = np.zeros((mlwin[0],rngsize_slc),dtype='float64')
-    
+
     cdef unsigned long az_ml, lkvrowstart, lkvrowend, lkvtrimstart, lkvtrimend, azposstart, azposend
-    
-    
+
+
     # Try to import .kz files if option kzcalc == False.
     if not kzcalc:
         kz.attrs['slope_corrected'] = True
@@ -521,70 +590,82 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
             print('kapok.uavsar.load | Importing kz between track '+str(tr)+' and reference track. ('+time.ctime()+')')
             for seg in range(num_segments):
                 if not kzcalc:
-                    file = glob(datapath+tracknames[tr]+'*s'+str(seg+1)+'*.kz')
-                    file_alt = glob(datapath+tracknames[tr]+'*.kz')
+                    kz_pattern = datapath+tracknames[tr]+'*_{}_s{}_2x8.kz'.format(bc_str, str(seg+1))
+                    if tomocal:
+                        kz_pattern = kz_pattern.replace('_s1','')
                     
+                    file = glob(kz_pattern)
+                    file_alt = glob(datapath+tracknames[tr]+'*.kz')
+
                     if len(file) >= 1:
                         kz_rows = int(ann.query('lkv_'+str(seg+1)+'_2x8 Rows'))
                         kz_cols = int(ann.query('lkv_'+str(seg+1)+'_2x8 Columns'))
+                        if tomocal:
+                            kz_rows = azsize_2x8
+                            kz_cols = rngsize_2x8
+                        
                         if kz_temp is None:
+                            print('Loading kz from "{}"...'.format(file[0]))
                             kz_temp = np.memmap(file[0], dtype='float32', mode='r', shape=(kz_rows, kz_cols))
                         else:
+                            print('Loading kz from "{}"...'.format(file[0]))
                             kz_temp = np.vstack((kz_temp, np.memmap(file[0], dtype='float32', mode='r', shape=(kz_rows, kz_cols))))
                     elif (num_segments == 1) and (len(file_alt) >= 1):
                         kz_rows = int(ann.query('lkv_'+str(seg+1)+'_2x8 Rows'))
                         kz_cols = int(ann.query('lkv_'+str(seg+1)+'_2x8 Columns'))
                         if kz_temp is None:
+                            print('Loading kz from "{}"...'.format(file_alt[0]))
                             kz_temp = np.memmap(file_alt[0], dtype='float32', mode='r', shape=(kz_rows, kz_cols))
                         else:
+                            print('Loading kz from "{}"...'.format(file_alt[0]))
                             kz_temp = np.vstack((kz_temp, np.memmap(file_alt[0], dtype='float32', mode='r', shape=(kz_rows, kz_cols))))
                     else:
-                        print('kapok.uavsar.load | Cannot find .kz file matching pattern: "'+datapath+tracknames[tr]+'*s'+str(seg+1)+'*.kz".  Attempting to calculate kz from .baseline files.')
+                        print('kapok.uavsar.load | Cannot find .kz file matching pattern: "'+kz_pattern+'".  Attempting to calculate kz from .baseline files.  Note: This will fail for TomoSAR phase calibrated stacks because the corrected .baseline files do not exist!')
                         kzcalc = True
                         break
-            
+
             if not kzcalc:
                 # kz files appear to be kz_i0 rather than kz_0i.  Multiplying by -1 so that in the Scene object, kz_ij = kz[j] - kz[i].
                 kz[tr,:,:] = -1*mlook(zoom(kz_temp[azllhstart:azllhend,rngllhstart:rngllhend],mlwin_lkv),mlwin)[azllhoffset:(azllhoffset+azsize),rngllhoffset:(rngllhoffset+rngsize)]
-        
-        
+
+
         if (not kzcalc) and kzvertical:
             print('kapok.uavsar.load | Adjusting kz to use vertical direction. ('+time.ctime()+')')
             # Change kz values to measure vertical heights, rather than distances perpendicular to the ground surface.
             from kapok.lib import calcslope
-            
+
             # Calculate range and azimuth terrain slope angles.
             spacing = (f.attrs['cov_azimuth_pixel_spacing'], f.attrs['cov_slant_range_pixel_spacing'])
             rngslope, azslope = calcslope(dem, spacing, inc)
-            
+
             # Compute dot product of vertical and surface normal.
             height_dot_normal = 1 / np.sqrt(np.square(np.tan(rngslope)) + np.square(np.tan(azslope)) + 1)
-            
+
             # Normalize kz values by dot product.
             kz[:] *= height_dot_normal[np.newaxis,:,:]
             del height_dot_normal, rngslope, azslope
-    
-    
+
+
     # Calculating kz from .baseline and .lkv, if kzcalc == True.
     if kzcalc:
         kz.attrs['slope_corrected'] = False
-        
+
         for tr in range(0,num_tracks):
             print('kapok.uavsar.load | Calculating kz between track '+str(tr)+' and reference track. ('+time.ctime()+')')
             basefile = glob(datapath+tracknames[tr]+'*.baseline')
-            
+
             if len(basefile) >= 1:
                 basesch = np.loadtxt(basefile[0])
             else:
                 print('kapok.uavsar.load | Cannot find .baseline file matching pattern: "'+datapath+tracknames[tr]+'*.baseline'+'".  Aborting.')
                 return
-                
+
             istart = np.where(np.isclose(basesch[:,0],sbounds[0]))[0][0] # index of first azimuth line in subset
             iend = np.where(np.isclose(basesch[:,0],sbounds[1]))[0][0] # index of last azimuth line in subset
             base_enu[:] = sch2enu(basesch[istart:iend,1],basesch[istart:iend,2],basesch[istart:iend,3], peglat, peglon, peghdg)[0:base_enu.shape[0],:]
-            
-            
-            # Main kz calculation loop.                
+
+
+            # Main kz calculation loop.
             for az_ml in range(0,azsize):
                 # Calculate indices.
                 azstart = az_ml*mlwin[0]
@@ -595,74 +676,74 @@ def load(infile, outfile, mlwin=(20,5), smwin=(1,1), azbounds=None,
                     lkvrowend += 1
                 lkvtrimstart = (azstart + azbounds[0]) % mlwin_lkv[0]
                 lkvtrimend = lkvtrimstart + mlwin[0]
-                
+
                 # Current track look vector.
                 tracklkv[:,:,0] = (zoom(lkv[lkvrowstart:lkvrowend,:,0],mlwin_lkv)[lkvtrimstart:lkvtrimend] + base_enu[azstart:azend,np.newaxis,0])[0:mlwin[0],0:rngsize_slc]
                 tracklkv[:,:,1] = (zoom(lkv[lkvrowstart:lkvrowend,:,1],mlwin_lkv)[lkvtrimstart:lkvtrimend] + base_enu[azstart:azend,np.newaxis,1])[0:mlwin[0],0:rngsize_slc]
                 tracklkv[:,:,2] = (zoom(lkv[lkvrowstart:lkvrowend,:,2],mlwin_lkv)[lkvtrimstart:lkvtrimend] + base_enu[azstart:azend,np.newaxis,2])[0:mlwin[0],0:rngsize_slc]
-                
+
                 # Platform velocity vector.
-                velocity[:,:,0] = np.gradient(zoom(pos[lkvrowstart:lkvrowend,:,0],mlwin_lkv)[lkvtrimstart:lkvtrimend] + base_enu[azstart:azend,np.newaxis,0], axis=0)[0:mlwin[0],0:rngsize_slc]          
-                velocity[:,:,1] = np.gradient(zoom(pos[lkvrowstart:lkvrowend,:,1],mlwin_lkv)[lkvtrimstart:lkvtrimend] + base_enu[azstart:azend,np.newaxis,1], axis=0)[0:mlwin[0],0:rngsize_slc]          
-                velocity[:,:,2] = np.gradient(zoom(pos[lkvrowstart:lkvrowend,:,2],mlwin_lkv)[lkvtrimstart:lkvtrimend] + base_enu[azstart:azend,np.newaxis,2], axis=0)[0:mlwin[0],0:rngsize_slc]          
+                velocity[:,:,0] = np.gradient(zoom(pos[lkvrowstart:lkvrowend,:,0],mlwin_lkv)[lkvtrimstart:lkvtrimend] + base_enu[azstart:azend,np.newaxis,0], axis=0)[0:mlwin[0],0:rngsize_slc]
+                velocity[:,:,1] = np.gradient(zoom(pos[lkvrowstart:lkvrowend,:,1],mlwin_lkv)[lkvtrimstart:lkvtrimend] + base_enu[azstart:azend,np.newaxis,1], axis=0)[0:mlwin[0],0:rngsize_slc]
+                velocity[:,:,2] = np.gradient(zoom(pos[lkvrowstart:lkvrowend,:,2],mlwin_lkv)[lkvtrimstart:lkvtrimend] + base_enu[azstart:azend,np.newaxis,2], axis=0)[0:mlwin[0],0:rngsize_slc]
                 velocity = velocity / (np.linalg.norm(velocity,axis=2)[:,:,np.newaxis])
-                
+
                 # Project look vector onto velocity vector.
                 proj_lkv_velocity = np.sum(tracklkv*velocity,axis=2)[:,:,np.newaxis]*velocity
-                
+
                 # Get incidence angle with same dimensions as single-look kz buffer.
                 inc_buffer[:,0:rngsize*mlwin[1]] = zoom(inc[az_ml,:][np.newaxis,:],mlwin)
                 inc_buffer[:,rngsize*mlwin[1]:] = inc_buffer[:,(rngsize*mlwin[1]-1)][:,np.newaxis]
-                
+
                 # Component of look vector orthogonal to velocity.
                 lookcrossv[:,:,0] = tracklkv[:,:,1]*velocity[:,:,2] - tracklkv[:,:,2]*velocity[:,:,1]
                 lookcrossv[:,:,1] = tracklkv[:,:,2]*velocity[:,:,0] - tracklkv[:,:,0]*velocity[:,:,2]
                 lookcrossv[:,:,2] = tracklkv[:,:,0]*velocity[:,:,1] - tracklkv[:,:,1]*velocity[:,:,0]
-                
+
                 # Baseline and perpendicular baseline.
                 baseline = base_enu[azstart:azend]
                 baselinepsign = np.sum(baseline[:,np.newaxis,:]*lookcrossv,axis=2)/np.sum(lookcrossv*lookcrossv,axis=2)
                 baselinep = np.linalg.norm((np.sum(baseline[:,np.newaxis,:]*lookcrossv,axis=2)/np.sum(lookcrossv*lookcrossv,axis=2))[:,:,np.newaxis]*lookcrossv,axis=2)
-                
+
                 # Calculate kz.
                 kz_buffer = (4*np.pi/wavelength) * baselinep / (np.linalg.norm(tracklkv,axis=2)*np.sin(inc_buffer)) * np.sign(baselinepsign)
-                
+
                 kz[tr,az_ml,:] = mlook(kz_buffer[:,rngbounds[0]:rngbounds[1]], mlwin)
-    
-    
-    
+
+
+
     # Close the file, then return it as a Scene object.
     f.close()
     print('kapok.uavsar.load | Complete. ('+time.ctime()+')     ')
     return kapok.Scene(outfile)
-    
-    
+
+
 class Ann(object):
     """Class for loading and interacting with a UAVSAR annotation file."""
-    
+
     def __init__(self, file):
         """Load in the specified .ann file as a list of strings and
             initialize.
-        
+
         Arguments:
             file (str): UAVSAR annotation filename to load.
-            
+
         """
         self.file = file
         fd = open(self.file, 'r')
         self.ann = fd.read().split('\n')
         return
-        
-    
+
+
     def query(self, keyword):
-        """Query the annotation file for the specified annotation keyword. 
-        
+        """Query the annotation file for the specified annotation keyword.
+
         Arguments:
             keyword (str): The keyword to query.
-            
+
         Returns:
             value: The value of the specified keyword.
-            
+
         """
         for n in range(len(self.ann)):
             if self.ann[n].startswith(keyword):
@@ -675,25 +756,25 @@ class Ann(object):
                 except ValueError: # if we can't convert the string to a number, leave it as a string
                     val = self.ann[n].split('=',maxsplit=1)[-1].split(';')[0].strip()
                     return val
-                    
+
         return None
-        
-               
+
+
 def findsegment(az,azsize):
     """For a given azimuth index, return the segment number and
     the azimuth index within the given segment.
-    
+
     Arguments:
         az: Azimuth index of interest.
         azsize: List containing the azimuth size of each segment.
-        
+
     Returns:
         seg: Segment number.
         azoff: Azimuth index within the segment.
-        
+
     """
     azstart = np.insert(np.cumsum(azsize), 0, 0)[0:-1]
-    
+
     if az <= np.sum(azsize):
         seg = np.max(np.where(azstart <= az))
         azoff = az - azstart[seg]
@@ -701,16 +782,16 @@ def findsegment(az,azsize):
         seg = azstart.shape[0] - 1
         azoff = azsize[seg]
         print('kapok.uavsar.fingsegment | SLC row index of '+str(az)+' is larger than the size of the data.  Returning maximum index.')
-        
+
     return seg, azoff
-    
-    
+
+
 def getslcblock(file, rngsize, azstart, azend, rngbounds=None, file2=None,
                 azsize=None):
     """Load SLC data into a NumPy array buffer.  If the file2 argument is
     specified in the arguments, this function will treat the two files as
     consecutive segments, and will join them.
-    
+
     Arguments:
         file (str): Filename of the first SLC.
         rngsize (int): Number of columns (range bins).  Same for both SLCs.
@@ -730,11 +811,11 @@ def getslcblock(file, rngsize, azstart, azend, rngbounds=None, file2=None,
         azsize (int): Number of rows (azimuth bins) for the first SLC.  Only
             required if file2 is specified.  Otherwise we only load in the
             lines of the SLC before azend.
-        
+
     Returns:
         block: NumPy array of complex64 datatype, containing the loaded SLC
         data between the specified azimuth bounds.
-    
+
     """
     if file2 is None:
         byteoffset = rngsize * 8 * azstart
@@ -752,12 +833,12 @@ def getslcblock(file, rngsize, azstart, azend, rngbounds=None, file2=None,
         if rngbounds is not None:
             slca = slca[:,rngbounds[0]:rngbounds[1]]
             slcb = slcb[:,rngbounds[0]:rngbounds[1]]
-        return np.vstack((slca,slcb))    
+        return np.vstack((slca,slcb))
 
 
 def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
     """Display a quick look intensity image for a given UAVSAR SLC stack.
-    
+
     Arguments:
         infile (str): Input annotation file of the UAVSAR stack.
         tr (int): Track index of the desired image.  Default: 0
@@ -772,48 +853,53 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
             of the original 1x1 SLC image size, not the 8x2 or 4x1
             image sizes.
         savefile (str): Output path and filename to save the displayed image.
-    
+
     """
     import matplotlib.pyplot as plt
-    
+
     # Load the annotation file.
     try:
         ann = Ann(infile)
     except:
         print('kapok.uavsar.quicklook | Cannot load UAVSAR annotation file. Aborting.')
         return
-    
-    
+
     # Get track filenames and number of tracks.
     temp = ann.query('stackline1')
+
+    if 'L090' in temp:
+        band = 'L'
+    elif 'P090' in temp:
+        band = 'P'
+
     num = 1
     if temp is not None:
-        tracknames = [temp.split('_L090')[0]]
+        tracknames = [temp.split('_{0}090'.format(band))[0]]
         num += 1
         temp = ann.query('stackline'+str(num))
         while temp is not None:
-            tracknames.append(temp.split('_L090')[0])
+            tracknames.append(temp.split('_{0}090'.format(band))[0])
             num += 1
             temp = ann.query('stackline'+str(num))
     else:
         print('kapok.uavsar.quicklook | Cannot find track names in UAVSAR annotation file.  Aborting.')
         return
-    
-    
+
+
     # Path containing SLCs and other files (assume in same folder as .ann):
     datapath = os.path.dirname(infile)
     if datapath != '':
         datapath = datapath + '/'
-        
+
     pol = pol.upper()
-    
+
     # Get filenames and dimensions of SLCs for each segment.
     num_segments = ann.query('Number of Segments')
-    
+
     slcfiles = []
     for seg in range(num_segments):
         file = glob(datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_2x8.slc')
-        
+
         if len(file) == 1:
             slcfiles.append(file[0])
             slcwindow = (8,2)
@@ -829,7 +915,7 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
             return
         else:
             file = glob(datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x4.slc')
-            
+
             if len(file) == 1:
                 slcfiles.append(file[0])
                 slcwindow = (4,1)
@@ -845,7 +931,7 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
                 return
             else:
                 file = glob(datapath+tracknames[tr]+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc')
-                
+
                 if len(file) == 1:
                     slcfiles.append(file[0])
                     slcwindow = (1,1)
@@ -864,8 +950,8 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
                     if seg > 0:
                         print('kapok.uavsar.quicklook | Please ensure that you downloaded all segments of the data from the UAVSAR download page by using the "Segment 1", "Segment 2", etc., radio buttons.')
                     return
-    
-    
+
+
     mlwin = (mlwin[0]//slcwindow[0],mlwin[1]//slcwindow[1])
     azsize = np.sum(azsize_slc) // mlwin[0]
     rngsize = rngsize_slc // mlwin[1]
@@ -879,40 +965,40 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
     else:
         azsize_slc1x1 = ann.query('slc_1_1x1 Rows')
 
-   
+
     # Load and multilook quicklook intensity image.
     qlimage = np.zeros((azsize,rngsize),dtype='float32')
-    
+
     num_blocks = int(np.sum(azsize_slc)*rngsize_slc*8/1e9)
     if num_blocks < (num_segments + 1):
         num_blocks = num_segments + 1
     az_vector = np.round(np.linspace(0, azsize, num=num_blocks+1)).astype('int')
     az_vector[num_blocks] = azsize
-    
+
     for n, azstart in enumerate(az_vector[0:-1]):
         azend = az_vector[n+1]
         azstart_slc = azstart*mlwin[0]
         azend_slc = azend*mlwin[0]
         seg_start, azoffset_start = findsegment(azstart_slc, azsize_slc)
         seg_end, azoffset_end = findsegment(azend_slc, azsize_slc)
-        
+
         file = slcfiles[seg_start]
-        
+
         if seg_start == seg_end:
             slc = getslcblock(file, rngsize_slc, azoffset_start, azoffset_end)
         else:
             file2 = slcfiles[seg_end]
             slc = getslcblock(file, rngsize_slc, azoffset_start, azoffset_end, file2=file2, azsize=azsize_slc[seg_start])
-        
+
         qlimage[azstart:azend,:] = mlook(np.real(slc*np.conj(slc)),mlwin)
-    
-    
-    plt.figure()        
-    
+
+
+    plt.figure()
+
     qlimage = np.real(qlimage)
     qlimage[qlimage <= 1e-10] = 1e-10
     qlimage = 10*np.log10(qlimage)
-    
+
     plt.imshow(qlimage, vmin=-25, vmax=0, cmap='gray', aspect=0.25, interpolation='nearest', extent=(0,rngsize_slc1x1,np.sum(azsize_slc1x1),0))
     plt.colorbar(label=pol+' Backscatter (dB)')
     plt.xlabel('Range Index')
@@ -921,3 +1007,470 @@ def quicklook(infile, tr=0, pol='hh', mlwin=(40,10), savefile=None):
 
     if savefile is not None:
         plt.savefig(savefile, dpi=125, bbox_inches='tight', pad_inches=0.1)
+
+
+def merge_reference_slcs(infile, merge_slc=True, merge_kz=True):
+    """ Merge multi-segment reference track SLCs into a single-segment SLC.
+        Useful when working with TomoSAR-calibrated stacks where the secondary SLCs
+        have been merged into a single segment, but the reference SLCs are still
+        the original files.
+    
+    """
+    # Load the annotation file.
+    try:
+        ann = Ann(infile)
+    except:
+        print('kapok.uavsar.load | Cannot load UAVSAR annotation file. Aborting.')
+        return
+    
+    # Get reference track name.
+    temp = ann.query('stackline1')
+
+    if 'L090' in temp:
+        band = 'L'
+    elif 'P090' in temp:
+        band = 'P'
+    
+    if temp is not None:
+        trackname = temp.split('_{0}090'.format(band))[0]
+    else:
+        print('kapok.uavsar.load | Cannot find reference track name in UAVSAR annotation file.  Aborting.')
+        return
+
+    # Get SLC dimensions and number of segments.
+    rngsize_slc = int(ann.query('slc_1_1x1 Columns'))
+    rngsize_2x8 = int(ann.query('slc_1_2x8 Columns'))
+    num_segments = ann.query('Number of Segments')
+    if num_segments > 1:
+        azsize_slc = np.zeros(num_segments,dtype='int32')
+        azsize_2x8 = np.zeros(num_segments,dtype='int32')
+        for n in range(num_segments):
+            azsize_slc[n] = ann.query('slc_'+str(n+1)+'_1x1 Rows')
+            azsize_2x8[n] = ann.query('slc_'+str(n+1)+'_2x8 Rows')
+    else:
+        azsize_slc = int(ann.query('slc_1_1x1 Rows'))
+        azsize_2x8 = int(ann.query('slc_1_2x8 Rows'))
+    
+    # Check if data is BC or BU:
+    if 'BC' in ann.query('slc_1_1x1'):
+        bc_str = 'BC'
+    else:
+        bc_str = 'BU'
+
+    # Path containing SLCs and other files (assume in same folder as .ann):
+    datapath = os.path.dirname(infile)
+    if datapath != '':
+        datapath = datapath + '/'
+
+    if merge_slc:
+        for pol in ['HH','HV','VV']:
+            print('kapok.uavsar.merge_reference_slcs | Merging {} SLCs...'.format(pol))
+            outslc = None
+            outfile = os.path.join(datapath, trackname+'_{}090{}_01_{}_1x1.slc'.format(band, pol, bc_str))
+            for seg in range(num_segments):
+                slc_pattern = os.path.join(datapath, trackname+'*'+pol+'_*_s'+str(seg+1)+'_1x1.slc')
+
+                file = glob(slc_pattern)
+
+                if len(file) == 1:
+                    if outslc is None:
+                        outslc = np.memmap(file[0], dtype='complex64', mode='c', shape=(azsize_slc[seg], rngsize_slc))
+                    else:
+                        outslc = np.vstack((outslc, np.memmap(file[0], dtype='complex64', mode='c', shape=(azsize_slc[seg], rngsize_slc))))
+                elif len(file) > 1:
+                    print('kapok.uavsar.merge_reference_slcs | Too many SLC files matching pattern: "'+slc_pattern+'".  Aborting.')
+                    return
+                else:
+                    print('kapok.uavsar.merge_reference_slcs | Cannot find SLC file matching pattern: "'+slc_pattern+'".  Aborting.')
+                    if seg > 0:
+                        print('kapok.uavsar.merge_reference_slcs | Please ensure that you downloaded all segments of the data from the UAVSAR download page by using the "Segment 1", "Segment 2", etc., radio buttons.')
+                    return
+            
+            print('kapok.uavsar.merge_reference_slcs | Saving merged {} SLC to file: "{}"...'.format(pol, outfile))
+            outslc.tofile(outfile)
+    
+    if merge_kz:
+        for pol in ['HH','HV','VV']:
+            print('kapok.uavsar.merge_reference_slcs | Merging {} kz files...'.format(pol))
+            outkz = None
+            outfile = os.path.join(datapath, trackname+'_{}090{}_01_{}_2x8.kz'.format(band, pol, bc_str))
+            for seg in range(num_segments):
+                kz_pattern = os.path.join(datapath, trackname+'*'+pol+'_*_s'+str(seg+1)+'_2x8.kz')
+
+                file = glob(kz_pattern)
+
+                if len(file) == 1:
+                    if outkz is None:
+                        outkz = np.memmap(file[0], dtype='float32', mode='c', shape=(azsize_2x8[seg], rngsize_2x8))
+                    else:
+                        outkz = np.vstack((outkz, np.memmap(file[0], dtype='float32', mode='c', shape=(azsize_2x8[seg], rngsize_2x8))))
+                elif len(file) > 1:
+                    print('kapok.uavsar.merge_reference_slcs | Too many kz files matching pattern: "'+kz_pattern+'".  Aborting.')
+                    return
+                else:
+                    print('kapok.uavsar.merge_reference_slcs | Cannot find kz file matching pattern: "'+kz_pattern+'".  Aborting.')
+                    if seg > 0:
+                        print('kapok.uavsar.merge_reference_slcs | Please ensure that you downloaded all segments of the data from the UAVSAR download page by using the "Segment 1", "Segment 2", etc., radio buttons.')
+                    return
+            
+            print('kapok.uavsar.merge_reference_slcs | Saving merged {} kz to file: "{}"...'.format(pol, outfile))
+            outkz.tofile(outfile)
+    
+    return
+
+
+
+#def load_polsar_mlc(infile, outfile=None, smwin=(1,1), azbounds=None, rngbounds=None, compression='gzip',
+#         compression_opts=4, overwrite=False):
+#    """Load a UAVSAR PolSAR MLC dataset into the Kapok format, and save it
+#        to target HDF5 file.
+#
+#    Arguments:
+#        infile (str): Path and filename of a UAVSAR .ann file containing the
+#            metadata for a UAVSAR PolSAR MLC dataset.
+#        outfile (str): Path and filename for the saved HDF5 dataset.
+#            Default: Same as input annotation file, but ends in "_kapok.h5".
+#        smwin: Tuple containing boxcar moving average window sizes in azimuth
+#            and slant range (in that order).  The covariance matrix will be
+#            smoothed using this window, without reducing the number of pixels
+#            in the data.  Default: No smoothing (1,1).
+#        azbounds: List containing starting and ending MLC azimuth index for
+#            desired subset.  Data outside these bounds will not be loaded.
+#            Default is to import all data.
+#        rngbounds: List containing starting and ending MLC range index for
+#            desired subset.  Data outside these bounds will not be loaded.
+#            Default is to import all data.
+#        compression (str): Compression keyword used when creating the HDF5
+#            datasets.  Default: 'gzip'.
+#        compression_opts (int): Compression option value used when creating
+#            the HDF5 datasets.  Number from 0 to 9, with 9 being maximum
+#            compression.  Default: 4.
+#        overwrite (bool): Set to True to overwrite an existing Kapok HDF5
+#            file if necessary.  Default: False.
+#
+#    Returns:
+#        scene: A Kapok scene object pointing to the newly created HDF5 file.
+#
+#    """
+#    # Load the annotation file.
+#    try:
+#        ann = Ann(infile)
+#    except:
+#        print('kapok.uavsar.load_polsar_mlc | Cannot load UAVSAR annotation file. Aborting.')
+#        return
+#
+#
+#    # Create the HDF5 file.
+#    if outfile is None:
+#        outfile = os.path.splitext(infile)[0] + '_kapok.h5'
+#
+#    if os.path.isfile(outfile) and not overwrite:
+#        print('kapok.uavsar.load_polsar_mlc | Target HDF5 file already exists.  Loading existing data.')
+#        return kapok.Scene(outfile)
+#    elif overwrite:
+#        try:
+#            f = h5py.File(outfile,'w')
+#        except:
+#            print('kapok.uavsar.load_polsar_mlc | Cannot create new HDF5 file. Check if path is valid. Aborting.')
+#            return
+#    else:
+#        try:
+#            f = h5py.File(outfile,'x')
+#        except:
+#            print('kapok.uavsar.load_polsar_mlc | Cannot create new HDF5 file. Check if path is valid and ensure file does not already exist. Aborting.')
+#            return
+#
+#
+#
+#    # Get MLC dimensions.
+#    azsize_mlc = ann.query('mlc_pwr.set_rows')
+#    rngsize_mlc = ann.query('mlc_pwr.set_cols')
+#
+#    # Get SLC dimensions.
+#    azsize_slc = ann.query('slc_pwr.set_rows')
+#    rngsize_slc = ann.query('slc_pwr.set_cols')
+#
+#    # Get track filename.
+#    tracknames = [ann.query('hgt').split('_L090')[0]]
+#
+#    # Basic metadata parameters.
+#    num_tracks = 1 # Number of Tracks
+#    num_bl = 0 # Number of Baselines
+#    num_pol = int(3) # Number of Polarizations (HH, sqrt(2)*HV, VV)
+#    num_cov_elements = num_tracks*num_pol # Number of Covariance Matrix Elements in Each Row
+#
+#    f.attrs['stack_name'] = tracknames[0]
+#    f.attrs['site'] = ann.query('Site Description')
+#    f.attrs['url'] = ann.query('URL')
+#    f.attrs['sensor'] = 'UAVSAR'
+#    f.attrs['mode'] = ann.query('Acquisition Mode')
+#    f.attrs['processor'] = 'production'
+#
+#    print('kapok.uavsar.load_polsar_mlc | Scene ID: '+f.attrs['stack_name'])
+#    print('kapok.uavsar.load_polsar_mlc | Site Description: '+f.attrs['site'])
+#    print('kapok.uavsar.load_polsar_mlc | URL: '+f.attrs['url'])
+#
+#    print('kapok.uavsar.load_polsar_mlc | Importing metadata. ('+time.ctime()+')')
+#
+#    f.attrs['average_altitude'] = ann.query('Average Altitude')
+#    f.attrs['image_starting_slant_range'] = ann.query('Image Starting Range')*1000
+#    f.attrs['slc_azimuth_pixel_spacing'] = ann.query('slc_mag.row_mult')
+#    f.attrs['slc_slant_range_pixel_spacing'] = ann.query('slc_mag.col_mult')
+#    f.attrs['cov_azimuth_pixel_spacing'] = ann.query('mlc_pwr.row_mult')
+#    f.attrs['cov_slant_range_pixel_spacing'] = ann.query('mlc_pwr.col_mult')
+#
+#    f.attrs['num_tracks'] = num_tracks
+#    f.attrs['num_baselines'] = num_bl
+#    f.attrs['tracks'] = np.array(tracknames,dtype='S')
+#
+#    f.attrs['compression'] = compression
+#    f.attrs['compression_opts'] = compression_opts
+#
+#    # Get SCH Peg from Annotation File
+#    peglat = ann.query('Peg Latitude')
+#    peglon = ann.query('Peg Longitude')
+#    peghdg = ann.query('Peg Heading')
+#    f.attrs['peg_latitude'] = peglat
+#    f.attrs['peg_longitude'] = peglon
+#    f.attrs['peg_heading'] = peghdg
+#
+#    # Save in attributes as degrees, but convert to radians for coordinate transformation functions.
+#    peglat = np.radians(peglat)
+#    peglon = np.radians(peglon)
+#    peghdg = np.radians(peghdg)
+#
+#    if (azbounds is not None) or (rngbounds is not None):
+#        f.attrs['subset'] = True
+#    else:
+#        f.attrs['subset'] = False
+#
+#
+#    # Check azimuth bounds for validity.
+#    if azbounds is None:
+#        azbounds = [0,azsize_mlc]
+#
+#    if azbounds[1] <= azbounds[0]:
+#        print('kapok.uavsar.load_polsar_mlc | Invalid azimuth bounds.  Must be ascending.  Aborting.')
+#        return
+#
+#    if azbounds[0] < 0:
+#        print('kapok.uavsar.load_polsar_mlc | Lower azimuth bound ('+str(azbounds[0])+') is less than zero.  Setting lower azimuth bound to zero.')
+#        azbounds[0] = 0
+#
+#    if azbounds[1] > azsize_mlc:
+#        print('kapok.uavsar.load_polsar_mlc | Upper azimuth bound ('+str(azbounds[1])+') greater than number of MLC lines ('+str(azsize_mlc)+').')
+#        print('kapok.uavsar.load_polsar_mlc | Setting upper azimuth bound to '+str(azsize_mlc)+'.')
+#        azbounds[1] = azsize_mlc
+#
+#
+#    # Check range bounds for validity.
+#    if rngbounds is None:
+#        rngbounds = [0,rngsize_mlc]
+#
+#    if rngbounds[1] <= rngbounds[0]:
+#        print('kapok.uavsar.load_polsar_mlc | Invalid range bounds.  Must be ascending.  Aborting.')
+#        return
+#
+#    if rngbounds[0] < 0:
+#        print('kapok.uavsar.load_polsar_mlc | Lower range bound ('+str(rngbounds[0])+') is less than zero.  Setting lower azimuth bound to zero.')
+#        rngbounds[0] = 0
+#
+#    if rngbounds[1] > rngsize_mlc:
+#        print('kapok.uavsar.load_polsar_mlc | Upper range bound ('+str(rngbounds[1])+') greater than number of MLC columns ('+str(rngsize_mlc)+').')
+#        print('kapok.uavsar.load_polsar_mlc | Setting upper range bound to '+str(rngsize_slc)+'.')
+#        rngbounds[1] = rngsize_mlc
+#
+#
+#    # Subsetted image dimensions:
+#    azsize = (azbounds[1]-azbounds[0])
+#    rngsize = (rngbounds[1]-rngbounds[0])
+#    f.attrs['dim'] = (azsize, rngsize)
+#    f.attrs['dim_slc'] = (azsize_slc,rngsize_slc)
+#    f.attrs['ml_window'] = (ann.query('Number of Azimuth Looks in MLC'), ann.query('Number of Range Looks in MLC'))
+#    f.attrs['sm_window'] = smwin
+#    f.attrs['azimuth_bounds_mlc'] = azbounds
+#    f.attrs['range_bounds_mlc'] = rngbounds
+#
+#    # Path containing MLCs and other files (assume in same folder as .ann):
+#    datapath = os.path.dirname(infile)
+#    if datapath != '':
+#        datapath = datapath + '/'
+#
+#    # Initialize covariance matrix dataset in HDF5 file:
+#    cov = f.create_dataset('cov', (azsize, rngsize, num_cov_elements, num_cov_elements), dtype='complex64', compression=compression, shuffle=True, compression_opts=compression_opts)
+#
+#    # Populate covariance matrix with MLC data.
+#    for num, pol in enumerate(['HHHH', 'HHHV', 'HHVV', 'HVHV', 'HVVV', 'VVVV']):
+#        file = glob(datapath+ann.query('mlc'+pol))
+#
+#        if len(file) == 1:
+#            if pol in ['HHHH', 'HVHV', 'VVVV']:
+#                mlc = np.memmap(file[0], dtype='float32', mode='c', shape=(azsize_mlc,rngsize_mlc))
+#            else:
+#                mlc = np.memmap(file[0], dtype='complex64', mode='c', shape=(azsize_mlc,rngsize_mlc))
+#
+#            mlc = mlc[azbounds[0]:azbounds[1],rngbounds[0]:rngbounds[1]] # Subset data, if requested.
+#
+#            if pol == 'HHHH':
+#                cov[:,:,0,0] = mlc
+#            elif pol == 'HHHV':
+#                cov[:,:,0,1] = np.sqrt(2)*mlc
+#            elif pol == 'HHVV':
+#                cov[:,:,0,2] = mlc
+#            elif pol == 'HVHV':
+#                cov[:,:,1,1] = 2*mlc
+#            elif pol == 'HVVV':
+#                cov[:,:,1,2] = np.sqrt(2)*mlc
+#            elif pol == 'VVVV':
+#                cov[:,:,2,2] = mlc
+#
+#        elif len(file) > 1:
+#            print('kapok.uavsar.load_polsar_mlc | Too many MLC files matching pattern: "'+datapath+ann.query('mlc'+pol)+'".  Aborting.')
+#            return
+#        else:
+#            print('kapok.uavsar.load_polsar_mlc | Cannot find MLC file matching pattern: "'+datapath+ann.query('mlc'+pol)+'".  Aborting.')
+#            return
+#
+#    f.flush()
+#
+#    # Boxcar Smoothing:
+#    if smwin != (1,1):
+#        print('kapok.uavsar.load | Boxcar averaging covariance matrix. ('+time.ctime()+')')
+#        for row in range(0,num_cov_elements):
+#            for col in range(row,num_cov_elements):
+#                cov[:,:,row,col] = smooth(cov[:,:,row,col],smwin)
+#
+#    cov.attrs['description'] = 'Covariance Matrix'
+#    cov.attrs['basis'] = 'lexicographic'
+#    cov.attrs['num_pol'] = 3
+#    cov.attrs['pol'] = np.array(['HH', 'sqrt(2)*HV', 'VV'],dtype='S')
+#    print('kapok.uavsar.load_polsar_mlc | Covariance matrix data import complete. ('+time.ctime()+')     ')
+#
+#    # Get sensor wavelength from annotation file.
+#    wavelength = ann.query('Center Wavelength')
+#    wavelength /= 100 # convert from cm to m
+#    f.attrs['wavelength'] = wavelength
+#
+#    # Calculate lat/lon/dem values for each MLC pixel using UAVSAR HGT file and annotation data.
+#    lat, lon, dem = geocode_polsar_mlc(ann)
+#
+#
+#
+#
+#    ##### GOT THIS FAR, STILL CODE FROM STACK LOAD BELOW THIS POINT #####
+#
+#
+#
+#
+#
+#
+#    # Initialize latitude dataset and import values:
+#    print('kapok.uavsar.load | Importing latitude values. ('+time.ctime()+')')
+#    lat = f.create_dataset('lat', (azsize, rngsize), dtype='float32', compression=compression, compression_opts=compression_opts)
+#    lat[:] = mlook(zoom(llh[azllhstart:azllhend,rngllhstart:rngllhend,0],mlwin_lkv),mlwin)[azllhoffset:(azllhoffset+azsize),rngllhoffset:(rngllhoffset+rngsize)]
+#    lat.attrs['units'] = 'degrees'
+#    lat.attrs['description'] = 'Latitude'
+#
+#    # Initialize longitude dataset and import values:
+#    print('kapok.uavsar.load | Importing longitude values. ('+time.ctime()+')')
+#    lon = f.create_dataset('lon', (azsize, rngsize), dtype='float32', compression=compression, compression_opts=compression_opts)
+#    lon[:] = mlook(zoom(llh[azllhstart:azllhend,rngllhstart:rngllhend,1],mlwin_lkv),mlwin)[azllhoffset:(azllhoffset+azsize),rngllhoffset:(rngllhoffset+rngsize)]
+#    lon.attrs['units'] = 'degrees'
+#    lon.attrs['description'] = 'Longitude'
+#
+#    # Initialize DEM height dataset and import values:
+#    print('kapok.uavsar.load | Importing DEM heights. ('+time.ctime()+')')
+#    dem = f.create_dataset('dem', (azsize, rngsize), dtype='float32', compression=compression, compression_opts=compression_opts)
+#    dem[:] = mlook(zoom(llh[azllhstart:azllhend,rngllhstart:rngllhend,2],mlwin_lkv),mlwin)[azllhoffset:(azllhoffset+azsize),rngllhoffset:(rngllhoffset+rngsize)]
+#    dem.attrs['units'] = 'meters'
+#    dem.attrs['description'] = 'Processor DEM'
+#
+#    f.flush()
+#    del llh
+#
+#    # Incidence Angle Calculation for Reference Track
+#    print('kapok.uavsar.load | Calculating incidence angle values from reference track look vector. ('+time.ctime()+')')
+#    refvelocity = np.gradient(posmm, axis=0)
+#    refvelocity = refvelocity / (np.linalg.norm(refvelocity,axis=2)[:,:,np.newaxis])
+#
+#    proj_reflkv_v = np.sum(lkvmm*refvelocity,axis=2)[:,:,np.newaxis]*refvelocity
+#
+#    incident_lkv = lkvmm - proj_reflkv_v
+#    inc_ref = np.arccos(np.abs(incident_lkv[:,:,2])/np.linalg.norm(incident_lkv,axis=2))
+#
+#    # Initialize incidence angle dataset (stores reference track incidence angle):
+#    inc = f.create_dataset('inc', (azsize, rngsize), dtype='float32', compression=compression, compression_opts=compression_opts)
+#    inc.attrs['units'] = 'radians'
+#    inc.attrs['description'] = 'Reference Track Incidence Angle'
+#    inc[:] = mlook(zoom(inc_ref[azllhstart:azllhend,rngllhstart:rngllhend],mlwin_lkv),mlwin)[azllhoffset:(azllhoffset+azsize),rngllhoffset:(rngllhoffset+rngsize)]
+#    del refvelocity, proj_reflkv_v, incident_lkv, inc_ref
+#
+#    # Close the file, then return it as a Scene object.
+#    f.close()
+#    print('kapok.uavsar.load | Complete. ('+time.ctime()+')     ')
+#    return kapok.Scene(outfile)
+
+
+#def geocode_polsar_mlc(ann):
+#    """Calculate the latitude, longitude, and DEM height for each pixel in
+#    a UAVSAR PolSAR MLC dataset, using the UAVSAR annotation file.
+#
+#    Arguments:
+#        ann (kapok.uavsar.Ann): Ann object representing a UAVSAR annotation
+#            file.
+#
+#    Returns:
+#        lat (array): Array with the same dimensions as the MLC data, containing
+#            the latitude for each pixel, in radians.
+#        lon (array): Array with the same dimensions as the MLC data, containing
+#            the longitude for each pixel, in radians.
+#        dem (array): Array with the same dimensions as the MLC data, containing
+#            the DEM height for each pixel, in meters, from the UAVSAR .hgt file.
+#
+#    """
+#    # Load DEM .hgt file.
+#    hgtrows = ann.query('hgt.set_rows')
+#    hgtcols = ann.query('hgt.set_cols')
+#    hgtfile = os.path.join(datapath, ann.query('hgt'))
+#    if os.path.isfile(hgt):
+#        hgt = np.memmap(hgtfile, dtype='float32', mode='c', shape=(hgtrows,hgtcols))
+#    else:
+#        print('kapok.uavsar.load_polsar_mlc | HGT file not found: "'+hgtfile+'".  Aborting.')
+#        return
+#
+#    # Get SCH peg from ann.
+#    peglat = np.radians(ann.query('Peg Latitude'))
+#    peglon = np.radians(ann.query('Peg Longitude'))
+#    peghdg = np.radians(ann.query('Peg Heading'))
+#
+#    # Get latitude and longitude of each pixel in .hgt file.
+#    lon_origin = ann.query('hgt.row_addr')
+#    lat_origin = ann.query('hgt.col_addr')
+#    lat_spacing = ann.query('hgt.row_mult')
+#    lon_spacing = ann.query('hgt.col_mult')
+#
+#    hgtlon = np.tile(np.linspace(lon_origin, lon_origin + (hgtcols-1)*lon_spacing, num=hgtcols), (hgtrows, 1))
+#    hgtlat = np.tile(np.linspace(lat_origin, lat_origin + (hgtrows-1)*lat_spacing, num=hgtrows), (hgtcols, 1)).T
+#
+#    hgtlon = np.radians(hgtlon)
+#    hgtlat = np.radians(hgtlat)
+#
+#    # Get SCH coordinates of each pixel in .hgt file.
+#    sch = llh2sch(hgtlon, hgtlat, hgt, peglat, peglon, peghdg)
+#
+#    # Starting S coordinate of MLCs, and S coordinate spacing (in meters).
+#    sstart = ann.query('mlc_pwr.row_addr')
+#    sspacing = ann.query('mlc_pwr.row_mult')
+#
+#    # Starting slant range coordinate of MLCs, and slant range spacing (in meters).
+#    slantstart = ann.query('Image Starting Range') * 1000.0
+#    slantspacing = ann.query('mlc_pwr.col_mult')
+#
+#    # Calculate MLC azimuth and range coordinates of each pixel in .hgt file.
+#    hgtazimuth = (sch[0] - sstart) / sspacing
+#    hgtslant = sqrt()
+#
+#
+#    # azpix = (SCH.x-par.so)/par.delta_az;
+#    # slt_range = sqrt( POW2(peg.ra+(double)Z5) + POW2(peg.ra+par.gavgalt) - 2.0*(peg.ra+(double)Z5) * (peg.ra+par.gavgalt) * cos(SCH.y/peg.ra));
+#    # ranpix = (slt_range-par.Ro)/par.delta_R;

@@ -5,7 +5,7 @@
     for installation instructions.
 
     Author: Michael Denbina
-	
+
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -33,15 +33,15 @@ from os import path
 
 here = path.abspath(path.dirname(__file__))
 
-# Get the long description from the README file.       
-# try:
-#     import pypandoc
-#     long_description = pypandoc.convert_file('README.md', 'rst')
-#     long_description = long_description.replace("\r","")
-# except ImportError:
-# print("Pandoc not found. Long_description conversion failure.")
-with open(path.join(here, 'README.md'), encoding="utf-8") as f:
-    long_description = f.read()
+# Get the long description from the README file.
+try:
+    import pypandoc
+    long_description = pypandoc.convert('README.md', 'rst')
+    long_description = long_description.replace("\r","")
+except ImportError:
+    print("Pandoc not found. Long_description conversion failure.")
+    with open(path.join(here, 'README.md'), encoding="utf-8") as f:
+        long_description = f.read()
 
 
 setup(
@@ -69,10 +69,15 @@ setup(
     keywords='radar remotesensing ecology forestry biomass polinsar polarimetry',
 
     packages=find_packages(exclude=['docs', 'tests', 'scripts']),
-    
+
     # Required Packages
     install_requires=['numpy', 'scipy', 'matplotlib', 'h5py', 'cython', 'gdal', 'pyresample'],
-    
+
+    # Package for Automated Testing
+    extras_require={
+        'test': ['pytest'],
+    },
+
     # Cython Modules
     ext_modules = cythonize(['kapok/cohoptc.pyx', 'kapok/rvogc.pyx', 'kapok/uavsarc.pyx']),
     include_dirs=[np.get_include()],

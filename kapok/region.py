@@ -154,6 +154,7 @@ def cohregion(scene, az, rng, bl=0, mlwin=None, title=None, savefile=None,
     fig.gca().set_aspect('equal')
     plt.xlim(-1,1)
     plt.ylim(-1,1)
+    # plt.legend(bbox_to_anchor=(1, 1), bbox_transform=plt.gcf().transFigure, numpoints=1)
     plt.legend(bbox_to_anchor=(1, 1), bbox_transform=plt.gcf().transFigure, numpoints=1)
     if savefile is not None:
         plt.savefig(savefile, dpi=200, bbox_inches='tight', pad_inches=0.1)

@@ -2,7 +2,7 @@
 """Interpolation functions.
 
     Author: Michael Denbina
-    
+
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -27,7 +27,7 @@ from scipy import ndimage as nd
 def bilinear_interpolate(data, x, y):
     """Function to perform bilinear interpolation on the input array data, at
     the image coordinates given by input arguments x and y.
-    
+
     Arguments
         data (array): 2D array containing raster data to interpolate.
         x (array): the X coordinate values at which to interpolate (in array
@@ -36,7 +36,7 @@ def bilinear_interpolate(data, x, y):
         y (array): the Y coordinate values at which to interpolate (in array
             indices, starting at zero).  Note that Y refers to the first
             dimension of data (e.g., the rows).
-            
+
     Returns:
         intdata (array): The 2D interpolated array, with same dimensions as
             x and y.
@@ -66,31 +66,100 @@ def bilinear_interpolate(data, x, y):
     w_ul = (x1-x) * (y-y0) # weight for upper left value
     w_lr = (x-x0) * (y1-y) # weight for lower right value
     w_ur = (x-x0) * (y-y0) # weight for upper right value
-    
-    # Where the x or y coordinates are outside of the image boundaries, set one
+
+    # Where the x or y coordinates are outside of the image boundaries, set all
     # of the weights to nan, so that these values are nan in the output array.
-    w_ll[np.less(x,0)] = np.nan
-    w_ll[np.greater(x,data.shape[1]-1)] = np.nan
-    w_ll[np.less(y,0)] = np.nan
-    w_ll[np.greater(y,data.shape[0]-1)] = np.nan
-    
+    ind = (x < 0) | (x > data.shape[1]-1) | (y < 0) | (y > data.shape[0]-1)
+    if np.any(ind):
+        w_ll[ind] = np.nan
+        w_ul[ind] = np.nan
+        w_lr[ind] = np.nan
+        w_ur[ind] = np.nan
+        data_ll[ind] = np.nan
+        data_ul[ind] = np.nan
+        data_lr[ind] = np.nan
+        data_ur[ind] = np.nan
+
+    # Handle void data.
+    ind_all_void = np.isnan(data_ll) & np.isnan(data_ul) & np.isnan(data_lr) & np.isnan(data_ur)
+    ind_some_void = np.isnan(data_ll) & (~ind_all_void)
+    if np.any(ind_some_void):
+        w_ll[ind_some_void] = 0
+        data_ll[ind_some_void] = 0
+    ind_some_void = np.isnan(data_ul) & (~ind_all_void)
+    if np.any(ind_some_void):
+        w_ul[ind_some_void] = 0
+        data_ul[ind_some_void] = 0
+    ind_some_void = np.isnan(data_lr) & (~ind_all_void)
+    if np.any(ind_some_void):
+        w_lr[ind_some_void] = 0
+        data_lr[ind_some_void] = 0
+    ind_some_void = np.isnan(data_ur) & (~ind_all_void)
+    if np.any(ind_some_void):
+        w_ur[ind_some_void] = 0
+        data_ur[ind_some_void] = 0
+
     intdata = w_ll*data_ll + w_ul*data_ul + w_lr*data_lr + w_ur*data_ur
 
+    if np.any(ind_all_void):
+        intdata[ind_all_void] = np.nan
+    ind_low_weight = (w_ll + w_ul + w_lr + w_ur) < 0.99
+    if np.any(ind_low_weight):
+        intdata[ind_low_weight] = np.nan
+
     return intdata
-    
-    
+
+
+def nearest_interpolate(data, x, y, nodataval=np.nan):
+    """Function to perform nearest neighbor interpolation on the input array
+        data, at the image coordinates given by input arguments x and y.
+
+    Arguments
+        data (array): 2D array containing raster data to interpolate.
+        x (array): the X coordinate values at which to interpolate (in array
+            indices, starting at zero).  Note that X refers to the second
+            dimension of data (e.g., the columns).
+        y (array): the Y coordinate values at which to interpolate (in array
+            indices, starting at zero).  Note that Y refers to the first
+            dimension of data (e.g., the rows).
+        nodataval: No data value for points outside of the data bounds.
+
+    Returns:
+        intdata (array): The 2D interpolated array, with same dimensions as
+            x and y.
+
+    """
+    x = np.asarray(x)
+    y = np.asarray(y)
+
+    x = np.round(x).astype('int32')
+    y = np.round(y).astype('int32')
+
+    ind = (x < 0) | (y < 0) | (x >= data.shape[1]) | (y >= data.shape[0])
+
+    if np.any(ind):
+        x[ind] = 0
+        y[ind] = 0
+
+    intdata = data[y, x]
+
+    if np.any(ind):
+        intdata[ind] = nodataval
+
+    return intdata
+
+
 def nnfill(data):
     """Function to fill nan values in a 2D array using nearest neighbor
     interpolation.
-    
+
     Arguments:
         data (array): A 2D array containing the data to fill.  Void elements
             should have values of np.nan.
-    
+
     Returns:
         filled (array): The filled data.
-    
+
     """
     ind = nd.distance_transform_edt(np.isnan(data), return_distances=False, return_indices=True)
     return data[tuple(ind)]
-    
