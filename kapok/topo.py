@@ -4,15 +4,15 @@
     Estimating ground coherence and ground topographic phase using line
     fitting of the observed PolInSAR coherences.  For reference, see the
     paper:
-    
+
     S. R. Cloude and K. P. Papathanassiou, "Three-stage inversion process
     for polarimetric SAR interferometry," IEE Proceedings - Radar, Sonar
     and Navigation, vol. 150, no. 3, pp. 125-134, 2 June 2003.
     doi: 10.1049/ip-rsn:20030449
-    
-    
+
+
     Author: Michael Denbina
-    
+
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
@@ -37,10 +37,10 @@ import numpy as np
 
 
 def groundsolver(gamma, kz=None, groundmag=None, gammavol=None,
-                 returnall=False, silent=False):
+                 groundref=None, returnall=False, silent=False):
     """Solve for the ground coherence using a line fit of the observed
         coherences.
-    
+
         Arguments:
             gamma (array): Array containing the complex coherences to line
                 fit.  Should have dimensions (2, azimuth, range).
@@ -61,10 +61,16 @@ def groundsolver(gamma, kz=None, groundmag=None, gammavol=None,
                 to be closer to the volume-dominated coherence than the
                 ground-dominated coherence.  If specified, the ground
                 solver will always choose the ground solution that is
-                farther (on the complex plane) from gammavol.  Note:
-                Selection of the ground solution through the kz is
-                recommended (see above), as it is generally more
+                farther (on the complex plane) from the volume-dominated
+                coherence.  Note: Selection of the ground solution through
+                the kz is recommended (see above), as it is generally more
                 robust.
+            groundref (array): Array containing ground reference phases,
+                (e.g. an array of all zeros if you wish the ground solution
+                to be the closest solution to the DEM).  This can be useful
+                for certain datasets (such as PolSARProSim simulations)
+                where the ground height can be assumed to be close to some
+                value.
             returnall (bool): If set to True, function will return the
                 ground solutions, as well as the other ground solution
                 not chosen, and an array identifying which of the two
@@ -73,7 +79,7 @@ def groundsolver(gamma, kz=None, groundmag=None, gammavol=None,
                 will be returned.
             silent (bool): If set to True, no output status will be
                 printed.
-            
+
         Returns:
             ground (array): Array of complex-valued ground coherences.
             groundalt (array): The other ground solutions which were not
@@ -83,25 +89,37 @@ def groundsolver(gamma, kz=None, groundmag=None, gammavol=None,
                 If gamma[0,azimuth,range] is closer to the vol coherence
                 than gamma[1,azimuth,range], volindex[azimuth,range] will
                 equal 0.  Only returned if returnall == True.
-    
+
     """
     if not silent:
         print('kapok.topo.groundsolver | Solving for ground coherence. ('+time.ctime()+')')
     # Get the two possible ground coherence solutions.
     solutions = linefit(gamma, groundmag)
-    
-    if kz is not None:
-        if not isinstance(kz, (collections.abc.Sequence, np.ndarray)):
-            kz = np.ones((gamma.shape[1],gamma.shape[2]),dtype='float32') * kz
-            
+
+    if groundref is not None:
         # Get the volume-dominated coherences corresponding to each ground solution. (Observed coherence farthest from ground.)
         gammav = gamma.copy()
         gammav[0] = np.where(np.abs(solutions[0] - gamma[0]) > np.abs(solutions[0] - gamma[1]), gamma[0], gamma[1])
         gammav[1] = np.where(np.abs(solutions[1] - gamma[0]) > np.abs(solutions[1] - gamma[1]), gamma[0], gamma[1])
-        
+
+        # Angular separation between ground solutions and reference -- which is closer to reference?
+        sep = np.abs(np.angle(solutions*np.exp(-1j*groundref[np.newaxis, :, :])))
+
+        ground = np.where(sep[0] <= sep[1], solutions[0], solutions[1])
+        groundalt = np.where(sep[1] > sep[0], solutions[1], solutions[0])
+        volindex = (np.abs(gamma[1] - ground) > np.abs(gamma[0] - ground))
+    elif kz is not None:
+        if not isinstance(kz, (collections.abc.Sequence, np.ndarray)):
+            kz = np.ones((gamma.shape[1],gamma.shape[2]),dtype='float32') * kz
+
+        # Get the volume-dominated coherences corresponding to each ground solution. (Observed coherence farthest from ground.)
+        gammav = gamma.copy()
+        gammav[0] = np.where(np.abs(solutions[0] - gamma[0]) > np.abs(solutions[0] - gamma[1]), gamma[0], gamma[1])
+        gammav[1] = np.where(np.abs(solutions[1] - gamma[0]) > np.abs(solutions[1] - gamma[1]), gamma[0], gamma[1])
+
         # Angular separation between volume coherence and ground -- is it same sign as kz?
         sep = np.angle(gammav*np.conj(solutions))*np.sign(kz)
-        
+
         ground = np.where(sep[0] >= 0, solutions[0], solutions[1])
         groundalt = np.where(sep[0] >= 0, solutions[1], solutions[0])
         volindex = (np.abs(gamma[1] - ground) > np.abs(gamma[0] - ground))
@@ -110,7 +128,7 @@ def groundsolver(gamma, kz=None, groundmag=None, gammavol=None,
         # which is closer to the input gammavol array.
         volindex = (np.abs(gamma[1] - gammavol) < np.abs(gamma[0] - gammavol))
         gammav = np.where(volindex, gamma[1], gamma[0])
-        
+
         # Choose the ground that is farther from gammav.
         ground = np.where(np.abs(gammav - solutions[0]) > np.abs(gammav - solutions[1]),solutions[0],solutions[1])
         groundalt = np.where(np.abs(gammav - solutions[0]) > np.abs(gammav - solutions[1]),solutions[1],solutions[0])
@@ -119,10 +137,10 @@ def groundsolver(gamma, kz=None, groundmag=None, gammavol=None,
         ground = None
         groundalt = None
         volindex = None
-    
+
     if not silent:
         print('kapok.topo.groundsolver | Complete. ('+time.ctime()+')')
-        
+
     if returnall:
         return ground, groundalt, volindex
     else:
@@ -132,7 +150,7 @@ def groundsolver(gamma, kz=None, groundmag=None, gammavol=None,
 def linefit(gamma, groundmag=None):
     """Fit a line through two observed complex coherences and return
         the two possible ground coherence solutions.
-        
+
         Arguments:
             gamma (array):  Array with dimensions (2, azimuth, range)
                 containing the observed coherences to fit a line
@@ -156,62 +174,62 @@ def linefit(gamma, groundmag=None):
                 In general, this should be a rare situation to
                 occur, unless gammag is set to an unreasonably low
                 value.
-                
+
         Returns:
             solutions (array): Array with the same dimensions as
                 gamma containing the two ground complex coherence
                 solutions for each pixel.
-        
+
     """
     if groundmag is None:
         groundmag = np.ones((gamma.shape[1],gamma.shape[2]),dtype='float32')
     elif not isinstance(groundmag, (collections.abc.Sequence, np.ndarray)):
         groundmag = np.ones((gamma.shape[1],gamma.shape[2]),dtype='float32') * groundmag
-        
+
     groundmag[groundmag > 1] = 1.0
-    
-    solutions = np.zeros(gamma.shape,dtype='complex64')        
-        
+
+    solutions = np.zeros(gamma.shape,dtype='complex64')
+
     # Intersections between line through gamma and circle with radius groundmag:
     a = np.square(np.abs(gamma[0] - gamma[1]))
     b = 2*np.real(gamma[0]*np.conj(gamma[1])) - 2*np.square(np.abs(gamma[1]))
     c = np.square(np.abs(gamma[1])) - np.square(np.abs(groundmag))
-    
+
     xa = (-1*b - np.sqrt(np.square(b) - 4*a*c))/(2*a)
     xb = (-1*b + np.sqrt(np.square(b) - 4*a*c))/(2*a)
-    
+
     solutions[0] = xa*gamma[0] + (1-xa)*gamma[1]
     solutions[1] = xb*gamma[0] + (1-xb)*gamma[1]
-    
+
     # Is the coherence magnitude given by groundmag lower than both observed
     # coherences? (e.g., no valid intersection)
     ind = (groundmag < np.abs(gamma[0])) & (groundmag < np.abs(gamma[1]))
     if np.any(ind):
         solutions[0][ind] = np.nan
         solutions[1][ind] = np.nan
-         
-    # Are any of the solutions within the observed coherence region?       
+
+    # Are any of the solutions within the observed coherence region?
     ind = np.sign(np.angle(solutions*np.conj(gamma[1]))) == np.sign(np.angle(gamma[0]*np.conj(solutions)))
     if np.any(ind):
         solutions[ind] = np.nan
 
-        
+
     # Both solutions invalid:
     ind = np.isnan(solutions[0]) & np.isnan(solutions[1])
     if np.any(ind):
         solutions[0][ind] = gamma[0][ind]
         solutions[1][ind] = gamma[1][ind]
-    
+
     # First solution invalid.
     ind = np.isnan(solutions[0]) & np.isfinite(solutions[1])
     if np.any(ind):
         gammareplace = np.where(np.abs(solutions[1]-gamma[0]) > np.abs(solutions[1]-gamma[1]),gamma[0],gamma[1])
         solutions[0][ind] = gammareplace[ind]
-        
+
     # Other solution invalid.
     ind = np.isnan(solutions[1]) & np.isfinite(solutions[0])
     if np.any(ind):
         gammareplace = np.where(np.abs(solutions[0]-gamma[0]) > np.abs(solutions[0]-gamma[1]),gamma[0],gamma[1])
         solutions[1][ind] = gammareplace[ind]
-    
+
     return solutions

@@ -2,7 +2,7 @@
 """Coordinate system and transformation library.
 
     All units are in radians and meters.
-    
+
     Classes:
         Ellipsoid
         Peg: Longitude, Latitude, Heading, Local Radius, in [rad, rad, rad, m]
@@ -12,36 +12,36 @@
             [m, m, m]
         ENU: Local East, North, UP: x, y, z, relative to reference position
             (Peg)
-    
+
     Notes:
         1. LLH are represented as Longitude, Latitude, and Height (right-hand
             system, x-y-z).
         2. In this module Longitude and Latitude, as well as all other angles,
             are in radians.
         3. Heading is from North, in clockwise direction.
-    
+
     References:
         T. H. Meyer. Introduction to geometrical and physical geodesy:
         foundations of geomatics. ESRI Press, Redlands, California, 2010.
-    
+
     Author: Maxim Neumann
-       	
+
     Copyright 2016 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
-    
+
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
-    
+
     This program is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU General Public License for more details.
-    
+
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-    
+
 """
 import numpy as np
 from numpy import (array, sqrt, sin, cos, arcsin, arctan, arctan2, degrees)
@@ -57,6 +57,10 @@ class Ellipsoid:
             if select == 'WGS84':
                 semimajor_axis = 6378137.
                 eccentricity_sq = 0.00669437999015
+                name = select
+            elif select == 'GRS80':
+                semimajor_axis = 6378137.
+                eccentricity_sq = 0.00669438002290
                 name = select
             else:
                 print("Unknown select ellipsoid")
@@ -343,14 +347,14 @@ def enu_to_xyz_matrix(lon, lat):
                         [ clon, -slat * slon, clat * slon],
                         [ 0,     clat,        slat       ]])
     return enu_to_xyz
-    
-    
+
+
 def sch2enu(s, c, h, peglat, peglon, peghdg):
     """Quick conversion from SCH to ENU coordinates.
-    
+
     Convert an array of points in the SCH coordinate system to ENU
     (East-North-Up) coordinates, given the SCH peg location and heading.
-    
+
     Arguments:
         s: Array containing S values, in meters.
         c: Array containing C values, in meters.
@@ -358,21 +362,21 @@ def sch2enu(s, c, h, peglat, peglon, peghdg):
         peglat: Latitude of the SCH peg, in radians.
         peglon: Longitude of the SCH peg, in radians.
         peghdg: Heading of the SCH peg, in radians.
-        
+
     Returns:
         enu: Array containing ENU values, in meters.  Has dimensions
         (s.shape,3) if s, c, and h are arrays.  If s, c, and h are
         scalar, enu has dimensions of (3).
-    
+
     """
     s = np.array(s)
     c = np.array(c)
     h = np.array(h)
-    
+
     # Create origin peg object:
     peg = np.array([peglon, peglat, peghdg])
     peg = Peg(*peg)
-    
+
     # Make images of the S and C angles (s/peg.radius and c/peg.radius)
     s_angle = s / peg.radius
     c_angle = c / peg.radius
@@ -381,28 +385,28 @@ def sch2enu(s, c, h, peglat, peglon, peghdg):
     yl = r * np.cos(c_angle) * np.sin(s_angle)
     zl = r * np.sin(c_angle)
 
-    # From local XYZ to ECEF XYZ:    
+    # From local XYZ to ECEF XYZ:
     x = (peg.rotation_matrix[0,0]*xl + peg.rotation_matrix[0,1]*yl + peg.rotation_matrix[0,2]*zl) + peg.translation_vector[0]
     y = (peg.rotation_matrix[1,0]*xl + peg.rotation_matrix[1,1]*yl + peg.rotation_matrix[1,2]*zl) + peg.translation_vector[1]
     z = (peg.rotation_matrix[2,0]*xl + peg.rotation_matrix[2,1]*yl + peg.rotation_matrix[2,2]*zl) + peg.translation_vector[2]
     del xl,yl,zl
-    
+
     # From ECEF XYZ to ENU:
     originllh = LLH(peg()[0],peg()[1],0)
     originxyz = originllh.xyz(ellipsoid=peg.ellipsoid)
-    
+
     x -= originxyz()[0]
     y -= originxyz()[1]
-    z -= originxyz()[2]    
-    
+    z -= originxyz()[2]
+
     enumatrix = enu_to_xyz_matrix(peg()[0], peg()[1])
     enumatrix = enumatrix.T
-       
+
     e = enumatrix[0,0]*x + enumatrix[0,1]*y + enumatrix[0,2]*z
     n = enumatrix[1,0]*x + enumatrix[1,1]*y + enumatrix[1,2]*z
     u = enumatrix[2,0]*x + enumatrix[2,1]*y + enumatrix[2,2]*z
-    
-    if len(e.shape) > 0:       
+
+    if len(e.shape) > 0:
         enu = np.zeros((np.append(3,s.shape)),dtype='float32')
         enu[0] = e
         enu[1] = n
@@ -415,14 +419,14 @@ def sch2enu(s, c, h, peglat, peglon, peghdg):
         enu[2] = u
 
     return enu
-    
-    
+
+
 def llh2enu(lon, lat, h, peglat, peglon, peghdg):
     """Quick conversion from LLH to ENU coordinates.
-    
+
     Convert an array of points in the LLH coordinate system to ENU
     (East-North-Up) coordinates, given the SCH peg location and heading.
-    
+
     Arguments:
         lon: Array containing longitude values, in radians.
         lat: Array containing latitude values, in radians.
@@ -430,42 +434,42 @@ def llh2enu(lon, lat, h, peglat, peglon, peghdg):
         peglat: Latitude of the SCH peg, in radians.
         peglon: Longitude of the SCH peg, in radians.
         peghdg: Heading of the SCH peg, in radians.
-        
+
     Returns:
         enu: Array containing ENU values, in meters.  Has dimensions
         (lon.shape,3) if lon, lat, and h are arrays.  If lon, lat, and h are
         scalar, enu has dimensions of (3).
-    
+
     """
     lon = np.array(lon)
     lat = np.array(lat)
     h = np.array(h)
-    
+
     # Create origin peg object:
     peg = np.array([peglon, peglat, peghdg])
     peg = Peg(*peg)
-    
+
     # Transform LLH to ECEF XYZ coordinates.
     r = peg.ellipsoid.radius_east(lat)
     x = (r + h) * np.cos(lat) * np.cos(lon)
     y = (r + h) * np.cos(lat) * np.sin(lon)
     z = (r * (1.0 - peg.ellipsoid.e2) + h) * np.sin(lat)
-    
+
     # From ECEF XYZ to ENU:
     originllh = LLH(peg()[0],peg()[1],0)
     originxyz = originllh.xyz(ellipsoid=peg.ellipsoid)
-    
+
     x -= originxyz()[0]
     y -= originxyz()[1]
-    z -= originxyz()[2]    
-    
+    z -= originxyz()[2]
+
     enumatrix = enu_to_xyz_matrix(peg()[0], peg()[1])
     enumatrix = enumatrix.T
-       
+
     e = enumatrix[0,0]*x + enumatrix[0,1]*y + enumatrix[0,2]*z
     n = enumatrix[1,0]*x + enumatrix[1,1]*y + enumatrix[1,2]*z
     u = enumatrix[2,0]*x + enumatrix[2,1]*y + enumatrix[2,2]*z
-    
+
     if len(e.shape) > 0:
         enu = np.zeros((np.append(3,lon.shape)),dtype='float32')
         enu[0] = e
@@ -479,3 +483,67 @@ def llh2enu(lon, lat, h, peglat, peglon, peghdg):
         enu[2] = u
 
     return enu
+
+
+def llh2sch(lon, lat, h, peglat, peglon, peghdg):
+    """Quick conversion from LLH to SCH coordinates.
+
+    Convert an array of points in the LLH coordinate system to SCH
+    coordinates, given the SCH peg location and heading.
+
+    Arguments:
+        lon: Array containing longitude values, in radians.
+        lat: Array containing latitude values, in radians.
+        h: Array containing height values, in meters.
+        peglat: Latitude of the SCH peg, in radians.
+        peglon: Longitude of the SCH peg, in radians.
+        peghdg: Heading of the SCH peg, in radians.
+
+    Returns:
+        sch: Array containing SCH coordinate values, in meters.  Has dimensions
+        (lon.shape,3) if lon, lat, and h are arrays.  If lon, lat, and h are
+        scalar, sch has dimensions of (3).
+
+    """
+    lon = np.array(lon)
+    lat = np.array(lat)
+    h = np.array(h)
+
+    # Create origin peg object:
+    peg = np.array([peglon, peglat, peghdg])
+    peg = Peg(*peg)
+
+    # Transform LLH to ECEF XYZ coordinates.
+    r = peg.ellipsoid.radius_east(lat)
+    x = (r + h) * np.cos(lat) * np.cos(lon)
+    y = (r + h) * np.cos(lat) * np.sin(lon)
+    z = (r * (1.0 - peg.ellipsoid.e2) + h) * np.sin(lat)
+
+    # Transform ECEF XYZ to local XYZ coordinates.
+    x = x - peg.translation_vector[0]
+    y = y - peg.translation_vector[1]
+    z = z - peg.translation_vector[2]
+
+    xl = peg.rotation_matrix.T[0,0]*x + peg.rotation_matrix.T[0,1]*y + peg.rotation_matrix.T[0,2]*z
+    yl = peg.rotation_matrix.T[1,0]*x + peg.rotation_matrix.T[1,1]*y + peg.rotation_matrix.T[1,2]*z
+    zl = peg.rotation_matrix.T[2,0]*x + peg.rotation_matrix.T[2,1]*y + peg.rotation_matrix.T[2,2]*z
+
+    # Transform local XYZ to SCH.
+    r = np.sqrt(xl**2 + yl**2 + zl**2)
+    s = peg.radius * np.arctan2(yl, xl)
+    c = peg.radius * np.arcsin(zl / r)
+    h = r - peg.radius
+
+    if len(s.shape) > 0:
+        sch = np.zeros((np.append(3,lon.shape)),dtype='float32')
+        sch[0] = s
+        sch[1] = c
+        sch[2] = h
+        sch = np.moveaxis(sch,0,-1)
+    else:
+        sch = np.zeros((3),dtype='float32')
+        sch[0] = s
+        sch[1] = c
+        sch[2] = h
+
+    return sch

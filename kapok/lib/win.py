@@ -47,18 +47,18 @@ def mlook(data, mlwin):
     sh = np.array([ [nshape[i], data.shape[i]//nshape[i]] for i,x in enumerate(nshape) ]).flatten()
         
     if n_dim == 2:
-        if not any(np.mod(data.shape, nshape)):
+        if not np.any(np.mod(data.shape, nshape)):
             return data.reshape(sh).mean(-1).mean(1)
         else:
             return data[0:sh[0]*sh[1],0:sh[2]*sh[3]].reshape(sh).mean(-1).mean(1)
     elif n_dim == 3:
-        if not any(np.mod(data.shape, nshape)):
+        if not np.any(np.mod(data.shape, nshape)):
             return data.reshape(sh).mean(1).mean(2).mean(3)
         else:
             return data[0:sh[0]*sh[1],0:sh[2]*sh[3],0:sh[4]*sh[5]]\
                 .reshape(sh).mean(1).mean(2).mean(3)
     elif n_dim == 4:
-        if not any(np.mod(data.shape, nshape)):
+        if not np.any(np.mod(data.shape, nshape)):
             return data.reshape(sh).mean(1).mean(2).mean(3).mean(4)
         else:
             return data[0:sh[0]*sh[1],0:sh[2]*sh[3],0:sh[4]*sh[5],0:sh[6]*sh[7]]\
@@ -137,18 +137,18 @@ def nanmlook(data, mlwin):
     sh = np.array([ [nshape[i], data.shape[i]//nshape[i]] for i,x in enumerate(nshape) ]).flatten()
         
     if n_dim == 2:
-        if not any(np.mod(data.shape, nshape)):
+        if not np.any(np.mod(data.shape, nshape)):
             return np.nanmean(np.nanmean(data.reshape(sh),axis=-1),axis=1)
         else:
             return np.nanmean(np.nanmean(data[0:sh[0]*sh[1],0:sh[2]*sh[3]].reshape(sh),axis=-1),axis=1)
     elif n_dim == 3:
-        if not any(np.mod(data.shape, nshape)):
+        if not np.any(np.mod(data.shape, nshape)):
             return np.nanmean(np.nanmean(np.nanmean(data.reshape(sh),axis=1),axis=2),axis=3)
         else:
             return np.nanmean(np.nanmean(np.nanmean(data[0:sh[0]*sh[1],0:sh[2]*sh[3],0:sh[4]*sh[5]]\
                 .reshape(sh),axis=1),axis=2),axis=3)
     elif n_dim == 4:
-        if not any(np.mod(data.shape, nshape)):
+        if not np.any(np.mod(data.shape, nshape)):
             return np.nanmean(np.nanmean(np.nanmean(np.nanmean(data.reshape(sh),axis=1),axis=2),axis=3),axis=4)
         else:
             return np.nanmean(np.nanmean(np.nanmean(np.nanmean(data[0:sh[0]*sh[1],0:sh[2]*sh[3],0:sh[4]*sh[5],0:sh[6]*sh[7]]\

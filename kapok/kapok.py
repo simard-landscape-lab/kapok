@@ -2,15 +2,16 @@
 """Kapok Main Module
 
     Core Kapok module containing Scene class definition and methods.  A Scene
-    object contains a PolInSAR dataset including covariance matrix, incidence
-    angle, kz, latitude, longitude, processor DEM, and metadata.
-    
-    Methods available for data visualization, coherence optimization, and
-    forest model inversion, among others.
+    object contains a PolSAR or PolInSAR dataset including covariance matrix,
+    incidence angle, kz (if applicable), latitude, longitude, processor DEM,
+    and metadata.
+
+    Methods available for data visualization, coherence optimization,
+    polarimetric decomposition, and forest model inversion, among others.
 
     Author: Michael Denbina
-	
-    Copyright 2016 California Institute of Technology.  All rights reserved.
+
+    Copyright 2016-2023 California Institute of Technology.  All rights reserved.
     United States Government Sponsorship acknowledged.
 
     This program is free software: you can redistribute it and/or modify
@@ -25,7 +26,7 @@
 
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
-        
+
 """
 import time
 import collections
@@ -37,6 +38,7 @@ import matplotlib.pyplot as plt
 plt.ion()
 
 import kapok.geo
+import kapok.plot
 import kapok.vis
 from kapok.lib import makehermitian, mb_cov_index, mb_tr_index, mb_bl_index, mb_num_baselines
 
@@ -45,76 +47,81 @@ from kapok.lib import makehermitian, mb_cov_index, mb_tr_index, mb_bl_index, mb_
 class Scene(object):
     """Scene object containing a PolInSAR dataset, and methods for viewing
         and processing the data.
-    
+
     """
-    
-    def __init__(self, file):
+
+    def __init__(self, file, read_only=False):
         """Scene initialization method.
-        
+
         Arguments:
             file (str): Path and filename to a previously saved Kapok HDF5
                 PolInSAR scene.
-        
+
         """
         # Load the HDF5 file.  If it can't be loaded, abort.
         try:
-            self.f = h5py.File(file,'r+')
+            if read_only:
+                self.f = h5py.File(file,'r')
+            else:
+                self.f = h5py.File(file,'r+')
         except:
-            print('kapok.Scene | Cannot load specified HDF5 file: "'+file+'".  Ensure file exists.  Aborting.')
+            print('kapok.Scene | Cannot load specified HDF5 file: "'+file+'".  Ensure file exists and is available for both reading and writing (e.g., is not already open by something else).  Aborting.')
+            import traceback
+            traceback.print_exc()
             return
-            
+
         # Easy access to datasets:
         self.cov = self.f['cov']
-        
+
         self.lat = self.f['lat']
         self.lon = self.f['lon']
         self.dem = self.f['dem']
-                
+
         self.kza = self.f['kz']
         self.inc = self.f['inc']
-        
+
         if 'pdopt/coh' in self.f:
             self.pdcoh = self.f['pdopt/coh']
         else:
             self.pdcoh = None
-        
+
         if 'pdopt/weights' in self.f:
             self.pdweights = self.f['pdopt/weights']
         else:
             self.pdweights = None
-            
+
         if 'pdopt/cohminor' in self.f:
             self.pdcohminor = self.f['pdopt/cohminor']
         else:
             self.pdcohminor = None
-            
+
         if 'products' in self.f:
             self.products = self.f['products']
-            
+
         if 'ancillary' in self.f:
             self.ancillary = self.f['ancillary']
-        
-        
+
+
         # Easy access to some commonly used metadata attributes:
         self.site = self.f.attrs['site']
         self.name = self.f.attrs['stack_name']
         self.tracks = self.f.attrs['tracks']
-        
+
         self.dim = tuple(self.f.attrs['dim'])
         self.spacing = (self.f.attrs['cov_azimuth_pixel_spacing'], self.f.attrs['cov_slant_range_pixel_spacing'])
-        
+
         self.num_tracks = self.f.attrs['num_tracks']
         self.num_baselines = self.f.attrs['num_baselines']
         self.num_pol = self.cov.attrs['num_pol']
-        
+
         self.ml_window = self.f.attrs['ml_window']
         self.sm_window = self.f.attrs['sm_window']
-        
-        self.wavelength = self.f.attrs['wavelength']  
-        
+
+        self.wavelength = self.f.attrs['wavelength']
+
         self.compression = self.f.attrs['compression']
         self.compression_opts = self.f.attrs['compression_opts']
-        
+
         # Detect old kz format (baseline-indexed) and convert to the new
         # format (track-indexed).
         if not (('indexing' in self.f['kz'].attrs) and (self.f['kz'].attrs['indexing'] == 'track')):
@@ -124,20 +131,20 @@ class Scene(object):
             if (answer == 'y') or (answer == 'yes'):
                 print('kapok.Scene | Converting to new format.')
                 kz_old = self.f['kz'][:]
-                
+
                 if ('slope_corrected' in self.f['kz'].attrs):
                     slope_corrected = self.f['kz'].attrs['slope_corrected']
                 else:
                     slope_corrected = False
-                
+
                 del self.f['kz']
-                
+
                 kz = self.f.create_dataset('kz', (self.num_tracks, self.dim[0], self.dim[1]), dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
                 kz.attrs['units'] = 'radians/meter'
                 kz.attrs['description'] = 'Interferometric Vertical Wavenumber'
                 kz.attrs['indexing'] = 'track'
                 kz.attrs['slope_corrected'] = slope_corrected
-                
+
                 if self.num_baselines > 1:
                     for tr in range(1,self.num_tracks):
                         bl = mb_bl_index(0, tr)
@@ -150,11 +157,11 @@ class Scene(object):
                 print('kapok.Scene | Conversion complete.')
             else:
                 print('kapok.Scene | File format not converted to new version.  Note: You will experience errors when using Scene methods which access the kz values.')
-        
-        
+
+
     def get(self, path):
         """Returns a specified dataset from the HDF5 file.
-        
+
         Arguments:
             path (str): Path and name to an HDF5 dataset within the Scene
                 file.  Note that shortcuts can be used if you wish to access
@@ -163,11 +170,11 @@ class Scene(object):
                 within them for the given dataset name.  Exact paths take
                 precedence, followed by datasets in 'products/', followed by
                 datasets in 'ancillary/'
-                
+
         Returns:
             data (array): The desired HDF5 dataset, in the form of a NumPy
                 array.
-                
+
         """
         if path == 'kz':
             print('kapok.Scene.get | Warning: Don\'t use Scene.get() to retrieve kz values.  Use Scene.kz() instead.  Returning None.')
@@ -194,45 +201,42 @@ class Scene(object):
             if isinstance(self.f['ancillary/'+path], h5py.Dataset):
                 return self.f['ancillary/'+path][:]
             else:
-                print('kapok.Scene.get | Desired path exists in HDF5 file, but is not a dataset.  Please specify the name of a HDF5 dataset.')
-                return None
+                raise ValueError('kapok.Scene.get | Desired path exists in HDF5 file, but is not a dataset.  Please specify the name of a HDF5 dataset.')
         elif ('ancillary'+path) in self.f:
             if isinstance(self.f['ancillary'+path], h5py.Dataset):
                 return self.f['ancillary'+path][:]
             else:
-                print('kapok.Scene.get | Desired path exists in HDF5 file, but is not a dataset.  Please specify the name of a HDF5 dataset.')
-                return None
+                raise ValueError('kapok.Scene.get | Desired path exists in HDF5 file, but is not a dataset.  Please specify the name of a HDF5 dataset.')
         else:
-            print('kapok.Scene.get | Desired path does not exist in HDF5 file.')
-            return None
-    
-    
+            raise ValueError('kapok.Scene.get | Desired path does not exist in HDF5 file.')
+
+
     def kz(self, bl):
         """Returns an array of kz values for the specified baseline.
-        
+
         Arguments:
             bl (int or tuple): The baseline of interest.  This argument can
                 either be the baseline index itself, or in the form of a tuple
-                of track indices (first value is the reference track, second
-                value is the secondary track).  Note: All baselines and tracks
+                of track indices (first value is the master track, second
+                value is the slave track).  Note: All baselines and tracks
                 are indexed starting at zero.  bl=(0,1) returns the kz values
                 between the first and second tracks.  See lib/mb.py for an
                 explanation of how baselines are indexed.
-            
+
         Returns:
             kz (array): Array of kz values.
-                
+
         """
         if not isinstance(bl, (collections.abc.Sequence, np.ndarray)):
             bl = mb_tr_index(bl)
-            
+
         if (bl is None) or (bl[0] >= self.num_tracks) or (bl[1] >= self.num_tracks):
             print('kapok.Scene.kz | Invalid baseline index.  Returning None.')
             return None
-        
+
         return (self.kza[bl[1]] - self.kza[bl[0]])
-    
-    
+
+
     def query(self, path=None):
         """Prints useful lists of datasets and attributes inside the HDF5 file.
 
@@ -242,7 +246,7 @@ class Scene(object):
                 specified, a list of all groups and datasets in the HDF5 file
                 will be printed instead.  If path is an empty string, the
                 attributes of the main HDF5 file will be printed.
-        
+
         """
         if path is None:
             print('kapok.Scene.query | Printing groups and datasets in HDF5 file...')
@@ -265,17 +269,18 @@ class Scene(object):
                     print('kapok.Scene.query | ' + item + ":", self.f.attrs[item])
         else:
             print('kapok.Scene.query | Desired path does not exist in HDF5 file.')
-    
-    
+
+
     def inv(self, method='rvog', name=None, desc=None, overwrite=False,
-            bl='all', tdf=None, epsilon=0.4, groundmag=None, ext=None, mu=0,
+            bl='all', tdf=None, epsilon=0.4, groundmag=None,
+            groundref=None, ext=None, mu=0,
             rngslope=None, mask=None, blcriteria='prod', minkz=0.0314,
             **kwargs):
         """Forest model inversion.
-        
+
         Estimate forest height using one of a number of models relating
         the forest's physical parameters to the PolInSAR observables.
-        
+
         Currently implemented models:
             'sinc': Sinc model for the coherence magnitude.  Calls
                 function kapok.sinc.sincinv().
@@ -286,7 +291,7 @@ class Scene(object):
             'rvog' (default): Random Volume over Ground model.  Estimates
                 ground phase using kapok.topo.groundsolver().  Model inversion
                 is performed by function kapok.rvog.rvoginv().
-                
+
         After model inversion is performed, HDF5 datasets will be created in
         'products/<name>/' for each estimated model parameter, where the model
         parameters are:
@@ -302,13 +307,13 @@ class Scene(object):
                 temporal decorrelation on the highest observed coherence.
                 Can be used by sinc, sincphase, and rvog models, though the
                 default value is generally unity.
-                
+
         Note that datasets will not be created for all of the above parameters
         for every inversion.  Only parameters that vary from pixel to pixel
         will be saved as datasets.  In the event that parameters are fixed
         during a model inversion, those fixed parameter values will be saved
-        as attributes to 'products/<name>/'.       
-        
+        as attributes to 'products/<name>/'.
+
         Arguments:
             method (str): Name of the desired model to invert.  Currently
                 supported values: 'sinc', 'sincphase', and 'rvog'.
@@ -337,6 +342,9 @@ class Scene(object):
             groundmag (array): Value for the magnitude of the estimated ground
                 coherences.  Used when finding the ground solution using the
                 line fit procedure.  Default: No ground decorrelation.
+            groundref (array): Ground reference phase (in radians).  Ground
+                solver will choose topographic phase solution closest to
+                groundref.
             ext: Fixed value(s) for the extinction parameter of the
                 RVoG model, if desired.
             mu: Fixed value(s) for the ground-to-volume scattering ratio
@@ -366,23 +374,25 @@ class Scene(object):
             **kwargs: Additional keyword arguments passed to the model
                 inversion functions, if desired.  See model inversion
                 function headers for more details.  Default: None.
-                
+
         Returns:
             hv (hdf5 dataset): Link to the HDF5 dataset containing the
                 estimated forest heights.
-        
+
         """
         if name is None:
             name = method
-            
-        if isinstance(bl, str) and 'all' in bl:
+
+        if (self.num_baselines > 1) and isinstance(bl, str) and 'all' in bl:
             bl = np.arange(self.num_baselines)
-        
+        elif self.num_baselines == 1:
+            bl = 0
+
         if rngslope is True:
             from kapok.lib import calcslope
             rngslope, azslope = calcslope(self.dem, self.spacing, self.inc)
             del azslope
-            
+
         # Check If Group Exists:
         if ('products/'+name in self.f) and overwrite:
             del self.f['products/'+name]
@@ -391,10 +401,10 @@ class Scene(object):
             return None
 
         result = self.f.create_group('products/'+name)
-        
+
         if desc is not None:
-            result.attrs['desc'] = desc 
-        
+            result.attrs['desc'] = desc
+
         # Perform Model Inversion...
         if isinstance(bl, (collections.abc.Sequence, np.ndarray)):
             if 'rvog' not in method:
@@ -402,7 +412,7 @@ class Scene(object):
                 return None
         else:
             print('kapok.Scene.inv | Performing model inversion for baseline #'+str(bl)+'.  Average kz: '+str(np.nanmean(self.kz(bl)))+'. ('+time.ctime()+')')
-        
+
         # Sinc Model
         if method == 'sinc':
             import kapok.sinc
@@ -411,7 +421,7 @@ class Scene(object):
                 if desc is None:
                     result.attrs['desc'] = 'Sinc coherence model.  Used phase diversity high coherence as volume coherence.'
 
-                result.attrs['pol'] = 'high'                    
+                result.attrs['pol'] = 'high'
                 gammav = self.coh('high', bl=bl)
             else:
                 print('kapok.Scene.inv | Phase diversity coherence optimization not yet run.  Performing sinc model inversion using HV polarization coherence. ('+time.ctime()+')')
@@ -420,17 +430,17 @@ class Scene(object):
 
                 result.attrs['pol'] = 'HV'
                 gammav = self.coh('HV', bl=bl)
-            
-            
+
+
             hv = kapok.sinc.sincinv(gammav, self.kz(bl), tdf=tdf, mask=mask, **kwargs)
-            
+
             result.attrs['model'] = 'sinc'
             result.attrs['baseline'] = bl
             result.create_dataset('hv', data=hv, dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
             result['hv'].attrs['fixed'] = False
             result['hv'].attrs['name'] = 'PolInSAR Forest Height'
             result['hv'].attrs['units'] = 'm'
-            
+
             # Create TDF dataset, if TDF varies across image.
             if isinstance(tdf, (collections.abc.Sequence, np.ndarray)):
                 result.create_dataset('tdf', data=tdf, dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
@@ -439,15 +449,15 @@ class Scene(object):
                 result['tdf'].attrs['units'] = ''
             elif tdf is not None:
                 result.attrs['tdf'] = tdf
-                
-        
+
+
         # Sinc and Phase Diff Model
         elif method == 'sincphase':
             import kapok.sinc
             import kapok.topo
-            
+
             kz = self.kz(bl)
-        
+
             ambh = (2*np.pi/np.nanmean(np.abs(kz)))
             if  np.nanmean(np.abs(kz)) < minkz:
                 print('kapok.Scene.inv | Warning: Selected baseline has mean ambiguity height of: '+str(ambh)+' m!  Are you sure you want to invert this baseline?')
@@ -458,21 +468,21 @@ class Scene(object):
                 kz *= np.sin(self.inc) * np.cos(rngslope) / np.sin(self.inc - rngslope)
             elif (rngslope is not None) and (self.kza.attrs['slope_corrected'] == True):
                 print('kapok.Scene.inv | Note: kz values have already been corrected for terrain slope.  No further correction applied.')
-            
-            
+
+
             if 'pdopt/coh' not in self.f:
                 print('kapok.Scene.inv | Run phase diversity coherence optimization before performing sinc and phase difference inversion.  Aborting.')
                 result = None
-            else:                
+            else:
                 if self.num_baselines > 1:
-                    ground, groundalt, volindex = kapok.topo.groundsolver(self.pdcoh[bl], kz=kz, groundmag=groundmag, returnall=True)
+                    ground, groundalt, volindex = kapok.topo.groundsolver(self.pdcoh[bl], kz=kz, groundmag=groundmag, groundref=groundref, returnall=True)
                     coh_high = np.where(volindex,self.pdcoh[bl,1],self.pdcoh[bl,0])
                     hv = kapok.sinc.sincphaseinv(coh_high, np.angle(ground), kz, epsilon=epsilon, tdf=tdf, mask=mask, **kwargs)
                 else:
-                    ground, groundalt, volindex = kapok.topo.groundsolver(self.pdcoh[:], kz=kz, groundmag=groundmag, returnall=True)
+                    ground, groundalt, volindex = kapok.topo.groundsolver(self.pdcoh[:], kz=kz, groundmag=groundmag, groundref=groundref, returnall=True)
                     coh_high = np.where(volindex,self.pdcoh[1],self.pdcoh[0])
                     hv = kapok.sinc.sincphaseinv(coh_high, np.angle(ground), kz, epsilon=epsilon, tdf=tdf, mask=mask, **kwargs)
-                
+
                 if desc is None:
                     result.attrs['desc'] = 'Sinc Coherence and Phase Difference model.'
 
@@ -486,7 +496,7 @@ class Scene(object):
                 result['ground'].attrs['fixed'] = False
                 result['ground'].attrs['name'] = 'Ground Complex Coherence'
                 result['ground'].attrs['units'] = ''
-                    
+
                 # Create epsilon dataset, if epsilon varies across the image.
                 # Otherwise, store it in an attribute.
                 if isinstance(epsilon, (collections.abc.Sequence, np.ndarray)):
@@ -496,7 +506,7 @@ class Scene(object):
                     result['epsilon'].attrs['units'] = ''
                 elif epsilon is not None:
                     result.attrs['epsilon'] = epsilon
-                    
+
                 # Create TDF dataset, if TDF varies across image.
                 if isinstance(tdf, (collections.abc.Sequence, np.ndarray)):
                     if np.any(np.iscomplex(tdf)):
@@ -508,24 +518,24 @@ class Scene(object):
                     result['tdf'].attrs['units'] = ''
                 elif tdf is not None:
                     result.attrs['tdf'] = tdf
-        
-        
+
+
         # RVoG Model
         elif method == 'rvog':
             import kapok.rvog
             import kapok.topo
-            
+
             if isinstance(bl, (collections.abc.Sequence, np.ndarray)):
                 bl = np.sort(bl)
                 kz = np.zeros((len(bl),self.dim[0],self.dim[1]),dtype='float32')
                 for m, n in enumerate(bl):
                     kz[m] = self.kz(n)
-                    
+
                 if 'ecc' in blcriteria:
                     gamma, kz, blsel = kapok.rvog.rvogblselect(self.pdcoh[bl,:,:,:], kz, method=blcriteria, gammaminor=self.pdcohminor[bl,:,:,:], minkz=minkz)
                 else:
                     gamma, kz, blsel = kapok.rvog.rvogblselect(self.pdcoh[bl,:,:,:], kz, method=blcriteria, minkz=minkz)
-                    
+
                 # Save which baseline was selected for each pixel.
                 result.create_dataset('bl', data=bl[blsel], dtype='int16', compression=self.compression, compression_opts=self.compression_opts)
                 result['bl'].attrs['fixed'] = False
@@ -533,13 +543,13 @@ class Scene(object):
                 result['bl'].attrs['units'] = ''
             else:
                 kz = self.kz(bl)
-            
+
                 ambh = (2*np.pi/np.nanmean(np.abs(kz)))
                 if  np.nanmean(np.abs(kz)) < minkz:
                     print('kapok.Scene.inv | Warning: Selected baseline has mean ambiguity height of: '+str(ambh)+' m!  Are you sure you want to invert this baseline?')
-                
 
-            # Slope Correct Kz, if Range Slope Specified            
+
+            # Slope Correct Kz, if Range Slope Specified
             if (rngslope is not None) and (self.kza.attrs['slope_corrected'] == False):
                 print('kapok.Scene.inv | Correcting kz values for range-facing terrain slope angle.')
                 kz *= np.sin(self.inc) * np.cos(rngslope) / np.sin(self.inc - rngslope)
@@ -547,30 +557,30 @@ class Scene(object):
                 print('kapok.Scene.inv | kz values have already been corrected for range-facing terrain slope angle.')
             elif rngslope is None:
                 rngslope = 0
-            
+
             if 'pdopt/coh' not in self.f:
                 print('kapok.Scene.inv | Run phase diversity coherence optimization before performing RVoG inversion.  Aborting.')
                 result = None
             else:
                 if isinstance(bl, (collections.abc.Sequence, np.ndarray)):
-                    ground, groundalt, volindex = kapok.topo.groundsolver(gamma, kz=kz, groundmag=groundmag, returnall=True)
+                    ground, groundalt, volindex = kapok.topo.groundsolver(gamma, kz=kz, groundmag=groundmag, groundref=groundref, returnall=True)
                     coh_high = np.where(volindex,gamma[1],gamma[0])
                     hv, exttdf, converged = kapok.rvog.rvoginv(coh_high, ground, self.inc, kz, ext=ext, tdf=tdf, mu=mu, rngslope=rngslope,
-                        mask=mask, **kwargs)                
+                        mask=mask, **kwargs)
                 elif self.num_baselines > 1:
-                    ground, groundalt, volindex = kapok.topo.groundsolver(self.pdcoh[bl], kz=kz, groundmag=groundmag, returnall=True)
+                    ground, groundalt, volindex = kapok.topo.groundsolver(self.pdcoh[bl], kz=kz, groundmag=groundmag, groundref=groundref, returnall=True)
                     coh_high = np.where(volindex,self.pdcoh[bl,1],self.pdcoh[bl,0])
                     hv, exttdf, converged = kapok.rvog.rvoginv(coh_high, ground, self.inc, kz, ext=ext, tdf=tdf, mu=mu, rngslope=rngslope,
                         mask=mask, **kwargs)
                 else:
-                    ground, groundalt, volindex = kapok.topo.groundsolver(self.pdcoh[:], kz=kz, groundmag=groundmag, returnall=True)
+                    ground, groundalt, volindex = kapok.topo.groundsolver(self.pdcoh[:], kz=kz, groundmag=groundmag, groundref=groundref, returnall=True)
                     coh_high = np.where(volindex,self.pdcoh[1],self.pdcoh[0])
                     hv, exttdf, converged = kapok.rvog.rvoginv(coh_high, ground, self.inc, kz, ext=ext, tdf=tdf, mu=mu, rngslope=rngslope,
                         mask=mask, **kwargs)
-                
+
                 if desc is None:
                     result.attrs['desc'] = 'Random Volume over Ground model.'
-    
+
                 result.attrs['model'] = 'rvog'
                 result.attrs['baseline'] = bl
                 if isinstance(bl, (collections.abc.Sequence, np.ndarray)):
@@ -585,7 +595,7 @@ class Scene(object):
                 result['ground'].attrs['fixed'] = False
                 result['ground'].attrs['name'] = 'Ground Complex Coherence'
                 result['ground'].attrs['units'] = ''
-                
+
                 # Save Extinction
                 if (ext is not None) and isinstance(ext, (collections.abc.Sequence, np.ndarray)):
                     result.create_dataset('ext', data=ext, dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
@@ -599,7 +609,7 @@ class Scene(object):
                     result['ext'].attrs['units'] = 'Np/m'
                 else:
                     result.attrs['ext'] = ext
-                    
+
                 # Save TDF
                 if (tdf is not None) and isinstance(tdf, (collections.abc.Sequence, np.ndarray)):
                     if np.any(np.iscomplex(tdf)):
@@ -616,14 +626,14 @@ class Scene(object):
                     result['tdf'].attrs['units'] = ''
                 else:
                     result.attrs['tdf'] = tdf
-                
 
-        
+
+
         else:
             print('kapok.Scene.inv | Inversion method "'+method+'" not recognized.  Aborting.')
             return None
 
-        
+
         # Create groundmag dataset, if groundmag varies across the image.
         # Otherwise, store it in an attribute.
         if (method == 'sincphase') or (method == 'rvog'):
@@ -634,16 +644,16 @@ class Scene(object):
                 result['groundmag'].attrs['units'] = ''
             elif groundmag is not None:
                 result.attrs['groundmag'] = groundmag
-        
-        
+
+
         self.f.flush()
         return result['hv']
-    
-       
+
+
     def opt(self, method='pdopt', reg=0.0, saveall=True, overwrite=False,
             **kwargs):
         """Coherence optimization.
-        
+
         Perform coherence optimization, and save the results to the HDF5 file.
         Currently, phase diversity coherence optimization is the only method
         supported.  The coherences will be saved in 'pdopt/coh'.  If the
@@ -652,7 +662,7 @@ class Scene(object):
         separation in the complex plane (e.g., the coherences along the minor
         axis of an elliptical coherence region) will be saved as
         'pdopt/cohminor'.
-            
+
         Arguments:
             method (str): Desired optimization algorithm.  Currently 'pdopt'
                 (phase diversity) is the only method supported.
@@ -667,31 +677,31 @@ class Scene(object):
                 the coherences already exist.
             **kwargs: Additional keyword arguments passed to coherence
                 optimization function.
-        
+
         """
         if ('pd' in method) or ('pdopt' in method) or ('phase diversity' in method):
             if ('pdopt/coh' in self.f) and (overwrite == False):
                 print('kapok.Scene.opt | Phase diversity coherence optimization already performed.  If you want to overwrite, set the overwrite keyword to True.  Aborting.')
             else:
                 import kapok.cohopt
-                
+
                 # If datasets already exist, remove them.
                 if ('pdopt/coh' in self.f):
                     del self.f['pdopt/coh']
                     self.pdcoh = None
-                
+
                 if ('pdopt/weights' in self.f):
                     del self.f['pdopt/weights']
                     self.pdweights = None
-                    
+
                 if ('pdopt/cohminor' in self.f):
                     del self.f['pdopt/cohminor']
                     self.pdcohminor = None
-                    
+
 
                 if self.num_baselines > 1: # Multiple Baselines
                     self.pdcoh = self.f.create_dataset('pdopt/coh', (self.num_baselines, 2, self.dim[0], self.dim[1]), dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
-                
+
                     if saveall:
                         self.pdweights = self.f.create_dataset('pdopt/weights', (self.num_baselines, 2, self.dim[0], self.dim[1], 3), dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
                         self.pdcohminor = self.f.create_dataset('pdopt/cohminor', (self.num_baselines, 2, self.dim[0], self.dim[1]), dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
@@ -702,45 +712,45 @@ class Scene(object):
                         tm = 0.5*(self.cov[:,:,row:row+self.num_pol,row:row+self.num_pol] + self.cov[:,:,col:col+self.num_pol,col:col+self.num_pol])
                         tm = makehermitian(tm)
                         om = self.cov[:,:,row:row+self.num_pol,col:col+self.num_pol]
-                        
+
                         print('kapok.cohopt.pdopt | Beginning phase diversity coherence optimization for baseline index '+str(bl)+'. ('+time.ctime()+')')
                         if saveall:
                             gammamax, gammamin, gammaminormax, gammaminormin, wmax, wmin = kapok.cohopt.pdopt(tm, om, reg=reg, returnall=saveall, **kwargs)
                         else:
                             gammamax, gammamin = kapok.cohopt.pdopt(tm, om, reg=reg, returnall=saveall, **kwargs)
-                            
+
                         temp = np.angle(gammamin*np.conj(gammamax))
                         ind = (np.sign(temp) == np.sign(self.kz(bl)))
-                        
+
                         swap = gammamax[ind].copy()
                         gammamax[ind] = gammamin[ind]
                         gammamin[ind] = swap
-                        
+
                         self.pdcoh[bl,0,:,:] = gammamax
                         self.pdcoh[bl,1,:,:] = gammamin
                         del gammamax, gammamin
-                        
+
                         if saveall:
                             self.pdcohminor[bl,0,:,:] = gammaminormax
                             self.pdcohminor[bl,1,:,:] = gammaminormin
-                            
+
                             ind = np.dstack((ind,ind,ind))
                             swap = wmax[ind].copy()
                             wmax[ind] = wmin[ind]
                             wmin[ind] = swap
-                            
+
                             self.pdweights[bl,0,:,:,:] = wmax
                             self.pdweights[bl,1,:,:,:] = wmin
-                            
+
                 else: # Single Baseline
                     self.pdcoh = self.f.create_dataset('pdopt/coh', (2, self.dim[0], self.dim[1]), dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
-                    
+
                     # Get Omega and T matrices:
                     row, col = mb_cov_index(0, 0, n_pol=self.num_pol)
                     tm = 0.5*(self.cov[:,:,row:row+self.num_pol,row:row+self.num_pol] + self.cov[:,:,col:col+self.num_pol,col:col+self.num_pol])
                     tm = makehermitian(tm)
                     om = self.cov[:,:,row:row+self.num_pol,col:col+self.num_pol]
-                    
+
                     print('kapok.cohopt.pdopt | Beginning phase diversity coherence optimization for single baseline. ('+time.ctime()+')')
                     if saveall:
                         self.pdweights = self.f.create_dataset('pdopt/weights', (2, self.dim[0], self.dim[1], 3), dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
@@ -748,45 +758,45 @@ class Scene(object):
                         gammamax, gammamin, gammaminormax, gammaminormin, wmax, wmin = kapok.cohopt.pdopt(tm, om, reg=reg, returnall=saveall, **kwargs)
                     else:
                         gammamax, gammamin = kapok.cohopt.pdopt(tm, om, reg=reg, returnall=saveall, **kwargs)
-                        
+
                     temp = np.angle(gammamin*np.conj(gammamax))
                     ind = (np.sign(temp) == np.sign(self.kz(0)))
-                    
+
                     swap = gammamax[ind].copy()
                     gammamax[ind] = gammamin[ind]
                     gammamin[ind] = swap
-                    
+
                     self.pdcoh[0,:,:] = gammamax
                     self.pdcoh[1,:,:] = gammamin
-                    
+
                     if saveall:
                         self.pdcohminor[0,:,:] = gammaminormax
                         self.pdcohminor[1,:,:] = gammaminormin
-                        
+
                         ind = np.dstack((ind,ind,ind))
                         swap = wmax.copy()
                         wmax[ind] = wmin[ind]
                         wmin[ind] = swap[ind]
-                        
+
                         self.pdweights[0,:,:,:] = wmax
                         self.pdweights[1,:,:,:] = wmin
-                        
+
                 self.f['pdopt'].attrs['name'] = 'Phase Diversity Coherence Optimization'
                 self.f['pdopt'].attrs['regularization_factor'] = reg
                 self.f.flush()
 
         else:
             print('kapok.Scene.opt | Requested coherence optimization method "'+method+'" not recognized.  Aborting.')
-            
+
         return
-    
-    
+
+
     def show(self, imagetype='pauli', pol=0, bl=0, tr=0, vmin=None, vmax=None,
              bounds=None, cmap=None, figsize=None, dpi=125, savefile=None,
              **kwargs):
         """Display images of backscatter, coherence, estimated forest
             heights, etc.
-        
+
         Arguments:
             imagetype (str): String describing what to display, or an array
                 containing data to plot.  Possible string options: 'pow' or
@@ -839,8 +849,8 @@ class Scene(object):
             **kwargs: Additional keyword arguments provided to plotting
                 functions.  Only works if imagetype is input data array.  The
                 string image types generally have preset options.
-            
-        """           
+
+        """
         if bounds is not None:
             if len(bounds) == 2:
                 extent = (0,self.dim[1],bounds[1],bounds[0])
@@ -848,8 +858,8 @@ class Scene(object):
                 extent = (bounds[2],bounds[3],bounds[1],bounds[0])
         else:
             extent = None
-        
-        
+
+
         if isinstance(imagetype,str):
             # Which type of image to display?
             if ('/hv' in imagetype) and ((imagetype in self.f) or ('products/'+imagetype in self.f)):
@@ -857,7 +867,7 @@ class Scene(object):
                     data = self.f[imagetype]
                 else:
                     data = self.f['products/'+imagetype]
-                
+
                 vmin = 0 if vmin is None else vmin
                 vmax = 50 if vmax is None else vmax
                 cmap = 'Greens' if cmap is None else cmap
@@ -867,13 +877,13 @@ class Scene(object):
                     kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=data.attrs['name'], bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
                 else:
                     kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=imagetype, bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
-    
+
             elif ('/ext' in imagetype) and ((imagetype in self.f) or ('products/'+imagetype in self.f)):
                 if imagetype in self.f:
                     data = self.f[imagetype]
                 else:
                     data = self.f['products/'+imagetype]
-                    
+
                 vmin = 0 if vmin is None else vmin
                 vmax = 0.6 if vmax is None else vmax
                 cmap = 'viridis' if cmap is None else cmap
@@ -889,121 +899,121 @@ class Scene(object):
                     kapok.vis.show_linear(data[:], vmin=vmin, vmax=vmax, cbar_label=data.attrs['name'], bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
                 else:
                     kapok.vis.show_linear(data[:], vmin=vmin, vmax=vmax, cbar_label=imagetype, bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
-    
+
             elif ('/tdf' in imagetype) and ((imagetype in self.f) or ('products/'+imagetype in self.f)):
                 if imagetype in self.f:
                     data = self.f[imagetype]
                 else:
                     data = self.f['products/'+imagetype]
-                    
+
                 vmin = 0 if vmin is None else vmin
                 vmax = 1 if vmax is None else vmax
                 cmap = 'afmhot' if cmap is None else cmap
-                
+
                 if np.any(np.iscomplex(data)):
                     kapok.vis.show_complex(data, bounds=bounds, cbar=True, cbar_label=data.attrs['name'], figsize=figsize, dpi=dpi, savefile=savefile)
                 else:
                     kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=data.attrs['name'], bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
-    
+
             elif ('products/' in imagetype) and (imagetype in self.f):
                 data = self.f[imagetype]
                 cmap = 'viridis' if cmap is None else cmap
                 kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=data.attrs['name']+' ('+data.attrs['units']+')', bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
-                
+
             elif ('ancillary/' in imagetype) and (imagetype in self.f):
                 data = self.f[imagetype]
                 cmap = 'viridis' if cmap is None else cmap
-                
+
                 if ('name' in data.attrs) and ('units' in data.attrs):
                     kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=data.attrs['name']+' ('+data.attrs['units']+')', bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
                 elif ('name' in data.attrs):
                     kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=data.attrs['name'], bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
                 else:
                     kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=imagetype, bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
-            
+
             elif ('pow' in imagetype) or ('power' in imagetype):
                 cmap = 'gray' if cmap is None else cmap
                 kapok.vis.show_power(self.power(pol=pol, tr=tr, bounds=bounds), extent=extent, cmap=cmap, vmin=vmin, vmax=vmax, figsize=figsize, dpi=dpi, savefile=savefile)
-                
+
             elif ('mag' in imagetype) and (('coh' in imagetype) or ('gamma' in imagetype)):
                 cmap = 'afmhot' if cmap is None else cmap
                 vmin = 0 if vmin is None else vmin
                 vmax = 1 if vmax is None else vmax
-                
+
                 try:
                     kapok.vis.show_linear(np.abs(self.coh(pol=pol, bl=bl, bounds=bounds)), extent=extent, cmap=cmap, vmin=vmin, vmax=vmax, cbar_label='Coherence Magnitude', figsize=figsize, dpi=dpi, savefile=savefile)
                 except:
                     print('kapok.Scene.show | Error: Requested coherence cannot be displayed.  Is the polarization identifier valid?  Have you run .opt()?')
-                
+
             elif (('ph' in imagetype) or ('arg' in imagetype)) and (('coh' in imagetype) or ('gamma' in imagetype)):
                 vmin = -np.pi if vmin is None else vmin
                 vmax = np.pi if vmax is None else vmax
-                
+
                 try:
                     kapok.vis.show_linear(np.angle(self.coh(pol=pol, bl=bl, bounds=bounds)), extent=extent, vmin=vmin, vmax=vmax, cmap='hsv', cbar_label='Phase (radians)', figsize=figsize, dpi=dpi, savefile=savefile)
                 except:
                     print('kapok.Scene.show | Error: Requested coherence cannot be displayed.  Is the polarization identifier valid?  Have you run .opt()?')
-                
+
             elif ('coh' in imagetype) or ('gamma' in imagetype):
                 try:
                     kapok.vis.show_complex(self.coh(pol=pol, bl=bl, bounds=bounds), extent=extent, cbar=True, figsize=figsize, dpi=dpi, savefile=savefile)
                 except:
                     print('kapok.Scene.show | Error: Requested coherence cannot be displayed.  Is the polarization identifier valid?  Have you run .opt()?')
-                
+
             elif ('pauli' in imagetype) or ('rgb' in imagetype):
                 i = tr*self.num_pol
                 tm = makehermitian(self.cov[:,:,i:i+self.num_pol,i:i+self.num_pol])
                 kapok.vis.show_paulirgb(tm, bounds=bounds, vmin=vmin, vmax=vmax, figsize=figsize, dpi=dpi, savefile=savefile, **kwargs)
-                
+
             elif ('inc' in imagetype):
                 vmin = 25 if vmin is None else vmin
-                vmax = 65 if vmax is None else vmax 
+                vmax = 65 if vmax is None else vmax
                 cmap = 'viridis' if cmap is None else cmap
                 kapok.vis.show_linear(np.degrees(self.inc), cmap=cmap, vmin=vmin, vmax=vmax, cbar_label='Incidence Angle (degrees)', bounds=bounds, figsize=figsize, dpi=dpi, savefile=savefile)
-                
+
             elif ('kz' in imagetype) or ('vertical wavenumber' in imagetype):
                 cmap = 'viridis' if cmap is None else cmap
-                
+
                 kapok.vis.show_linear(self.kz(bl), cmap=cmap, vmin=vmin, vmax=vmax, cbar_label=r'$k_{z}$ (rad/m)', bounds=bounds, figsize=figsize, dpi=dpi, savefile=savefile)
-                
+
             elif ('dem' in imagetype):
                 cmap = 'gist_earth' if cmap is None else cmap
                 kapok.vis.show_linear(self.dem, cmap=cmap, vmin=vmin, vmax=vmax, cbar_label=r'Elevation (m)', bounds=bounds, figsize=figsize, dpi=dpi, savefile=savefile)
-                
+
             elif ('close' in imagetype):
                 plt.close('all')
-                
+
             elif (imagetype in self.f):
                 data = self.f[imagetype]
                 cmap = 'viridis' if cmap is None else cmap
-                
+
                 if ('name' in data.attrs) and ('units' in data.attrs):
                     kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=data.attrs['name']+' ('+data.attrs['units']+')', bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
                 elif ('name' in data.attrs):
                     kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=data.attrs['name'], bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
                 else:
                     kapok.vis.show_linear(data, vmin=vmin, vmax=vmax, cbar_label=imagetype, bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile)
-                
+
             else:
                 print('kapok.Scene.show | Unrecognized image type: "'+str(imagetype)+'".  Aborting.')
-                
+
         elif isinstance(imagetype, (collections.abc.Sequence, np.ndarray)):
             cmap = 'viridis' if cmap is None else cmap
             kapok.vis.show_linear(imagetype, vmin=vmin, vmax=vmax, bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile, **kwargs)
-            
+
         elif isinstance(imagetype, h5py.Dataset):
             kapok.vis.show_linear(imagetype[:], vmin=vmin, vmax=vmax, bounds=bounds, cmap=cmap, figsize=figsize, dpi=dpi, savefile=savefile, **kwargs)
-            
+
         else:
             print('kapok.Scene.show | Unrecognized image type: "'+str(imagetype)+'".  Aborting.')
-            
+
         return
-    
-    
+
+
     def power(self, pol=0, tr=0, bounds=None):
         """Return the backscattered power, in linear units, for the specified
             polarization and track number.
-            
+
             Arguments:
                 pol: The polarization of the desired power.  Can be an
                     integer polarization index (0: HH, 1: HV, 2: VV), or a
@@ -1014,14 +1024,14 @@ class Scene(object):
                 bounds (int): If you only wish to calculate the coherence for
                     a subset of the data, specify the subset boundaries in the
                     form: (azmin,azmax,rngmin,rngmax).
-                
+
             Returns:
                 pwr (array): An image of backscattered power, in linear units.
-            
+
         """
         if isinstance(pol,str):
             pol = pol.lower()
-            
+
         if isinstance(pol,str) and (pol == 'hh'):
             pol = 0
         elif isinstance(pol,str) and (pol == 'hv'):
@@ -1032,7 +1042,7 @@ class Scene(object):
             pol = [np.sqrt(0.5), 0, np.sqrt(0.5)]
         elif isinstance(pol,str) and (pol == 'hh-vv'):
             pol = [np.sqrt(0.5), 0, -np.sqrt(0.5)]
-        
+
         if pol in range(self.num_pol):
             i = tr*self.num_pol + pol
             if bounds is None:
@@ -1041,39 +1051,39 @@ class Scene(object):
                 pwr = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i,i]
         elif len(pol) == self.num_pol:
             i = tr*self.num_pol
-            
+
             if bounds is None:
                 tm = self.cov[:,:,i:i+self.num_pol,i:i+self.num_pol]
                 tm = makehermitian(tm)
-                
+
                 wimage = np.ones((self.dim[0],self.dim[1],3,3),dtype='complex')
                 wimage[:,:] = np.array([[pol[0]*pol[0],pol[0]*pol[1],pol[0]*pol[2]],
                                              [pol[1]*pol[0],pol[1]*pol[1],pol[1]*pol[2]],
-                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])                                       
+                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])
                 pwr = np.sum(tm*wimage, axis=(2,3))
             else:
                 tm = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i:i+self.num_pol,i:i+self.num_pol]
                 tm = makehermitian(tm)
-                
+
                 wimage = np.ones(tm.shape,dtype='complex')
                 wimage[:,:] = np.array([[pol[0]*pol[0],pol[0]*pol[1],pol[0]*pol[2]],
                                              [pol[1]*pol[0],pol[1]*pol[1],pol[1]*pol[2]],
-                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])                                       
-                pwr = np.sum(tm*wimage, axis=(2,3))                
+                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])
+                pwr = np.sum(tm*wimage, axis=(2,3))
         else:
             print('kapok.Scene.power | Unrecognized polarization identifier.  Returning None.')
             pwr = None
-            
+
         if np.any(np.iscomplex(pwr)):
             return pwr
         else:
             return np.real(pwr)
-    
-    
+
+
     def coh(self, pol=0, polb=None, bl=0, pix=None, bounds=None, **kwargs):
         """Return the complex coherence for a specified polarization and
             baseline.
-            
+
             Arguments:
                 pol: The polarization of the desired coherence.  Can be an
                     integer polarization index (0: HH, 1: HV, 2: VV), or a
@@ -1093,10 +1103,9 @@ class Scene(object):
                     magnitude with the 'groundmag' keyword argument, which
                     will be passed along to kapok.topo.groundsolver through
                     **kwargs.  Default: 0.
-                polb: If different reference and secondary track polarizations
-                    are desired, specify the secondary polarization here.  Use
-                    same form (int, str, or list) as pol.  Default: None
-                    (polb=pol).
+                polb: If different master and slave track polarizations are
+                    desired, specify the slave polarization here.  Use same
+                    form (int, str, or list) as pol.  Default: None (polb=pol).
                 bl (int): Desired baseline index.  Default: 0.
                 pix (int): If you only wish to calculate the coherence for a
                 single pixel, specify a tuple with the (azimuth,range) indices
@@ -1109,21 +1118,21 @@ class Scene(object):
                     Note: This keyword overrides the pix keyword, if both
                     are given.
                 **kwargs: Extra keyword arguments.
-                
+
             Returns:
                 coh (array): A complex coherence image.
-            
+
         """
         if bounds is not None:
             if len(bounds) == 2:
                 bounds = (bounds[0], bounds[1], 0, self.dim[1])
-        
+
         if polb is None:
             polb = pol
-            
+
         if isinstance(pol,str):
             pol = pol.lower()
-        
+
         if isinstance(pol,str) and (pol == 'hh'):
             pol = 0
         elif isinstance(pol,str) and (pol == 'hv'):
@@ -1134,32 +1143,35 @@ class Scene(object):
             pol = [np.sqrt(0.5), 0, np.sqrt(0.5)]
         elif isinstance(pol,str) and (pol == 'hh-vv'):
             pol = [np.sqrt(0.5), 0, -np.sqrt(0.5)]
-        elif isinstance(pol,str) and (pol == 'ground'):
+        elif isinstance(pol,str) and ((pol == 'ground') or (pol == 'groundalt') or (pol == 'ground_alt')):
             import kapok.topo
             if bounds is None:
-                if self.num_baselines > 1:                
-                    ground = kapok.topo.groundsolver(self.pdcoh[bl], kz=self.kz(bl), silent=True, **kwargs)
+                if self.num_baselines > 1:
+                    ground, groundalt, _ = kapok.topo.groundsolver(self.pdcoh[bl], kz=self.kz(bl), silent=True, returnall=True, **kwargs)
                 else:
-                    ground = kapok.topo.groundsolver(self.pdcoh[:], kz=self.kz(bl), silent=True, **kwargs)
+                    ground, groundalt, _ = kapok.topo.groundsolver(self.pdcoh[:], kz=self.kz(bl), silent=True, returnall=True, **kwargs)
             else:
                 if self.num_baselines > 1:
                     pdcoh = self.pdcoh[bl,:,bounds[0]:bounds[1],bounds[2]:bounds[3]]
                 else:
                     pdcoh = self.pdcoh[:,bounds[0]:bounds[1],bounds[2]:bounds[3]]
 
-                kz = self.kz(bl)[bounds[0]:bounds[1],bounds[2]:bounds[3]]                    
-                ground = kapok.topo.groundsolver(pdcoh, kz=kz, silent=True, **kwargs)
-                return ground
-            
+                kz = self.kz(bl)[bounds[0]:bounds[1],bounds[2]:bounds[3]]
+                ground, groundalt, _ = kapok.topo.groundsolver(pdcoh, kz=kz, silent=True, returnall=True **kwargs)
+
             if pix is not None:
                 ground = ground[pix[0],pix[1]]
+                groundalt = groundalt[pix[0],pix[1]]
             
-            return ground
-        
-        
+            if 'alt' in pol:
+                return groundalt
+            else:
+                return ground
+
+
         if isinstance(polb,str):
             polb = polb.lower()
-            
+
         if isinstance(polb,str) and (polb == 'hh'):
             polb = 0
         elif isinstance(polb,str) and (polb == 'hv'):
@@ -1170,8 +1182,8 @@ class Scene(object):
             polb = [np.sqrt(0.5), 0, np.sqrt(0.5)]
         elif isinstance(polb,str) and (polb == 'hh-vv'):
             polb = [np.sqrt(0.5), 0, -np.sqrt(0.5)]
-        
-        
+
+
         if isinstance(pol,str) and ('high' in pol):
             if self.pdcoh is None:
                 coh = None
@@ -1207,111 +1219,111 @@ class Scene(object):
             if (pix is None) and (bounds is None):
                 coh = self.cov[:,:,i,j] / np.sqrt(np.abs(self.cov[:,:,i,i]*self.cov[:,:,j,j]))
             elif (bounds is not None):
-                coh = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i,j] / np.sqrt(np.abs(self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i,i]*self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],j,j]))                
+                coh = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i,j] / np.sqrt(np.abs(self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i,i]*self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],j,j]))
             else:
                 coh = self.cov[pix[0],pix[1],i,j] / np.sqrt(np.abs(self.cov[pix[0],pix[1],i,i]*self.cov[pix[0],pix[1],j,j]))
         elif isinstance(pol, (collections.abc.Sequence, np.ndarray)) and (len(pol) == self.num_pol):
             i,j = mb_cov_index(bl, pol=0, n_pol=self.num_pol)
-            
+
             if (pix is None) and (bounds is None):
                 t11 = self.cov[:,:,i:i+self.num_pol,i:i+self.num_pol]
                 t22 = self.cov[:,:,j:j+self.num_pol,j:j+self.num_pol]
                 om = self.cov[:,:,i:i+self.num_pol,j:j+self.num_pol]
-                
+
                 t11 = makehermitian(t11)
                 t22 = makehermitian(t22)
-                
+
                 wimage = np.ones(t11.shape,dtype='complex')
-                
+
                 wimage[:,:] = np.array([[pol[0]*pol[0],pol[0]*pol[1],pol[0]*pol[2]],
                                              [pol[1]*pol[0],pol[1]*pol[1],pol[1]*pol[2]],
-                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])                                       
+                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])
                 t11 = np.sum(t11*wimage, axis=(2,3))
-    
+
                 wimage[:,:] = np.array([[polb[0]*polb[0],polb[0]*polb[1],polb[0]*polb[2]],
                                              [polb[1]*polb[0],polb[1]*polb[1],polb[1]*polb[2]],
                                              [polb[2]*polb[0],polb[2]*polb[1],polb[2]*polb[2]]])
                 t22 = np.sum(t22*wimage, axis=(2,3))
-    
-                
+
+
                 wimage[:,:] = np.array([[pol[0]*polb[0],pol[0]*polb[1],pol[0]*polb[2]],
                                              [pol[1]*polb[0],pol[1]*polb[1],pol[1]*polb[2]],
                                              [pol[2]*polb[0],pol[2]*polb[1],pol[2]*polb[2]]])
                 om = np.sum(om*wimage, axis=(2,3))
-                
+
                 coh = om / np.sqrt(np.abs(t11*t22))
             elif (bounds is not None):
                 t11 = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i:i+self.num_pol,i:i+self.num_pol]
                 t22 = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],j:j+self.num_pol,j:j+self.num_pol]
                 om = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],i:i+self.num_pol,j:j+self.num_pol]
-                
+
                 t11 = makehermitian(t11)
                 t22 = makehermitian(t22)
-                
+
                 wimage = np.ones(t11.shape,dtype='complex')
-                
+
                 wimage[:,:] = np.array([[pol[0]*pol[0],pol[0]*pol[1],pol[0]*pol[2]],
                                              [pol[1]*pol[0],pol[1]*pol[1],pol[1]*pol[2]],
-                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])                                       
+                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])
                 t11 = np.sum(t11*wimage, axis=(2,3))
-    
+
                 wimage[:,:] = np.array([[polb[0]*polb[0],polb[0]*polb[1],polb[0]*polb[2]],
                                              [polb[1]*polb[0],polb[1]*polb[1],polb[1]*polb[2]],
                                              [polb[2]*polb[0],polb[2]*polb[1],polb[2]*polb[2]]])
                 t22 = np.sum(t22*wimage, axis=(2,3))
-    
-                
+
+
                 wimage[:,:] = np.array([[pol[0]*polb[0],pol[0]*polb[1],pol[0]*polb[2]],
                                              [pol[1]*polb[0],pol[1]*polb[1],pol[1]*polb[2]],
                                              [pol[2]*polb[0],pol[2]*polb[1],pol[2]*polb[2]]])
                 om = np.sum(om*wimage, axis=(2,3))
-                
+
                 coh = om / np.sqrt(np.abs(t11*t22))
             else:
                 t11 = self.cov[pix[0],pix[1],i:i+self.num_pol,i:i+self.num_pol]
                 t22 = self.cov[pix[0],pix[1],j:j+self.num_pol,j:j+self.num_pol]
                 om = self.cov[pix[0],pix[1],i:i+self.num_pol,j:j+self.num_pol]
-                
+
                 t11 = makehermitian(t11)
                 t22 = makehermitian(t22)
-                                
+
                 wimage = np.array([[pol[0]*pol[0],pol[0]*pol[1],pol[0]*pol[2]],
                                              [pol[1]*pol[0],pol[1]*pol[1],pol[1]*pol[2]],
-                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])                                       
+                                             [pol[2]*pol[0],pol[2]*pol[1],pol[2]*pol[2]]])
                 t11 = np.sum(t11*wimage)
-    
+
                 wimage = np.array([[polb[0]*polb[0],polb[0]*polb[1],polb[0]*polb[2]],
                                              [polb[1]*polb[0],polb[1]*polb[1],polb[1]*polb[2]],
                                              [polb[2]*polb[0],polb[2]*polb[1],polb[2]*polb[2]]])
                 t22 = np.sum(t22*wimage)
-    
-                
+
+
                 wimage = np.array([[pol[0]*polb[0],pol[0]*polb[1],pol[0]*polb[2]],
                                              [pol[1]*polb[0],pol[1]*polb[1],pol[1]*polb[2]],
                                              [pol[2]*polb[0],pol[2]*polb[1],pol[2]*polb[2]]])
                 om = np.sum(om*wimage)
-                
+
                 coh = om / np.sqrt(np.abs(t11*t22))
         else:
             print('kapok.Scene.coh | Unrecognized polarization identifier.  Returning None.')
             coh = None
-            
+
         return coh
-        
-        
+
+
     def region(self, az=None, rng=None, mode='basic', bl=0, savefile=None,
                **kwargs):
         """Coherence region plotting.
-        
+
             Creates a plot showing the coherence region in the complex plane.
             There are two modes.  'basic', the default, simply plots the
             observed coherence region, the standard Lexicographic and Pauli
             coherences, the optimized coherences, the line fit, and
-            the estimated ground coherence.  'interactive' creates a 
+            the estimated ground coherence.  'interactive' creates a
             coherence region with a UI which allows the user to specify
             values for the RVoG model parameters and observe the effect
             they have on the modelled coherences.
-            
+
             Arguments:
                 az (int): Azimuth index of the pixel to plot.
                 rng (int): Range index of the pixel to plot.
@@ -1324,26 +1336,26 @@ class Scene(object):
                 **kwargs: Additional keyword arguments to pass to the
                     kapok.region.cohregion and kapok.region.rvogregion
                     functions (see those function headers for details).
-        
+
         """
         import kapok.region
-        
+
         if (mode == 'basic') and (az is not None) and (rng is not None):
             kapok.region.cohregion(self, az, rng, bl=bl, savefile=savefile, **kwargs)
         else:
             kapok.region.rvogregion(self, az=az, rng=rng, bl=bl, **kwargs)
-            
+
         return
 
 
-    def geo(self, data, outfile, outformat='ENVI', resampling='pyresample',
+    def geo(self, data, outfile, outformat='GTiff', resampling='pyresample',
             nodataval=None, tr=2.7777778e-4, **kwargs):
         """Output a geocoded raster.
-        
+
             Resampling from radar coordinates to latitude/longitude using
             either the pyresample library, or gdalwarp (see description of
             'resampling' keyword argument, below).
-            
+
             Arguments:
                 data: Either a 2D array containing the data to geocode, or a
                     string identifying an HDF5 dataset in the file.
@@ -1358,7 +1370,7 @@ class Scene(object):
                     http://www.gdal.org/formats_list.html.
                 resampling (str): String identifying the resampling method.
                     The default option is 'pyresample', which uses the
-                    pyresample Python library as implemented in the 
+                    pyresample Python library as implemented in the
                     kapok.geo.radar2ll_pr() function.  Other options use
                     GDAL with the gdalwarp command line tool, as implemented
                     in the kapok.geo.radar2ll_gdal() function.  Possible GDAL
@@ -1375,13 +1387,13 @@ class Scene(object):
                     can be set to None in order for gdalwarp to choose the
                     output resolution automatically based on the input data.
                     Default: 2.7777778e-4 (1 arc second).
-            
-        """        
+
+        """
         if isinstance(data, str):
             data = self.get(data)
-        
+
         outpath, outfile = os.path.split(outfile)
-        
+
         if 'pyresample' in resampling:
             try:
                 import pyresample as pr
@@ -1396,31 +1408,33 @@ class Scene(object):
             kapok.geo.radar2ll_gdal(outpath, outfile, data, self.lat[:], self.lon[:],
                                outformat=outformat, resampling=resampling,
                                nodataval=nodataval, tr=tr)
-        
+
         return
 
 
-    def ingest(self, file, name, attrname=None, attrunits='', overwrite=False):
+    def ingest(self, file, name, attrname=None, attrunits='', overwrite=False,
+               no_data_value=None, **kwargs):
         """Ingest ancillary raster data in the WGS84 Geographic coordinate
             system, reproject into radar coordinates, and save in the Kapok
             HDF5 file.
-        
+
             Allows the user to import ancillary raster data in ENVI format
             such as lidar, external DEMs, etc.  This external raster data will
             be resampled to the radar coordinates using bilinear interpolation,
             then saved to the HDF5 file as datasets with the same dimensions as
             the radar data. The ingested data can then be compared to the
             radar-derived products or used in guided inversion functions, etc.
-            
+
             Data will be stored in the HDF5 file under 'ancillary/<name>', where
             <name> is the string given in the name argument to this function.
-            
+
             N.B. The data to import must be in WGS84 Geographic
             (latitude, longitude) coordinates.
-            
+
             Arguments:
-                file (str): Path and filename to the external raster data (in
-                    ENVI format).  Will be loaded in GDAL.
+                file (str): Path and filename to the external raster data.
+                    Will be loaded in GDAL, so the file must be a supported
+                    GDAL raster format.
                 name (str): Name of the HDF5 dataset which will be created to
                     store the ingested data.
                 attrname (str): Name which will be put into a 'name' attribute
@@ -1431,14 +1445,21 @@ class Scene(object):
                 overwrite (bool): Set to True to overwrite an already existing
                     HDF5 dataset, if one already exists under the same name as
                     the name input argument.  Default: False.
-                
+                no_data_value (scalar): Any pixels in the input raster with
+                    values equal to no_data_value will be set to NaN before
+                    interpolating.  If you are using a non-NaN void data value,
+                    make sure to set this keyword, otherwise void data may be
+                    incorrectly included in the interpolation.
+                **kwargs: Additional keyword arguments to be passed to
+                    kapok.geo.ll2radar.
+
             Returns:
                 data: A link to the newly created HDF5 dataset containing the
                     ingested data.
-        
+
         """
         from osgeo import gdal
-        
+
         # Check If Group Exists:
         if ('ancillary/'+name in self.f) and overwrite:
             del self.f['ancillary/'+name]
@@ -1449,36 +1470,182 @@ class Scene(object):
         # Load the data using GDAL and resample to radar coordinates:
         data = gdal.Open(file, gdal.GA_ReadOnly)
         geodata = data.GetGeoTransform()
-        
+        data_array = data.ReadAsArray()
+
+        if no_data_value is not None:
+            data_array[data_array == no_data_value] = np.nan
+
         origin = (geodata[3], geodata[0])
-        spacing = (geodata[5], geodata[1])       
-        
-        data = kapok.geo.ll2radar(data.ReadAsArray(), origin, spacing, self.lat[:], self.lon[:])
-        
+        spacing = (geodata[5], geodata[1])
+
+        data = kapok.geo.ll2radar(data_array, origin, spacing, self.lat[:], self.lon[:], **kwargs)
+
         # Create the HDF5 dataset:
         if np.any(np.iscomplex(data)):
             data = self.f.create_dataset('ancillary/'+name, data=data, dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
         else:
-            data = self.f.create_dataset('ancillary/'+name, data=data, dtype='float32', compression=self.compression, compression_opts=self.compression_opts)            
-            
+            data = self.f.create_dataset('ancillary/'+name, data=data, dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
+
         if attrname is None:
             attrname = name
         data.attrs['name'] = attrname
         data.attrs['units'] = attrunits
-        
+
         self.f.flush()
-        
+
         return data
+
+
+    def plot(self, plottype, data, otherdata=None, mask=None, xlim=None,
+             ylim=None, xname=None, yname=None, units=None, savefile=None,
+             **kwargs):
+        """Create a plot of Kapok Scene data for a variety of preset plot types.
+
+            Arguments:
+                plottype (str): A string identifying the type of plot desired.
+                    Possible options are 'density' (for a 2D histogram aka
+                    density plot), 'hist' (for a 1D histogram), and 'swath'
+                    (for the average and standard deviation of a quantity as
+                    a function of incidence angle, like for showing the
+                    variation of kz across the swath).
+                data (str or array): The data to plot.  In the case of
+                    'density' plot type, this is the data that will be
+                    plotted on the y-axis.  This argument can either be a
+                    string (which is passed to the scene.get method)
+                    specifying the desired HDF5 dataset, or it can be
+                    an array containing the data itself.
+                otherdata (str or array): In the case of 'density' plot type,
+                    this will be the data plotted on the x-axis.  Not used
+                    for other plot types.
+                mask (boolean array): Boolean array specifying the pixels
+                    to include (True) or not to include (False) from the plot.
+                xlim (tuple): Tuple of x-axis limits.
+                ylim (tuple): Tuple of y-axis limits, if applicable (for
+                    density plots).
+                xname (str): X-axis label.
+                yname (str): Y-axis label, if applicable (for density plots).
+                units (str): The units of the input data (e.g., 'm').
+                    Shown in some of the text annotations on the plot.
+                savefile (str): Path and filename to save the figure to,
+                    if desired.  Default: Does not save.
+                **kwargs: Additional keyword arguments to be passed to the
+                    plotting functions.  See function headers in kapok.lib.plot
+                    for reference.
+
+        """
+        if isinstance(data, str):
+            data = self.get(data)
+
+        if isinstance(otherdata, str):
+            otherdata = self.get(otherdata)
+
+
+        if 'density' in plottype:
+            if (data is None) or (otherdata is None):
+                print('kapok.Scene.plot | Missing data to plot.  Specify "data" and "otherdata" keyword arguments.  Aborting.')
+                return
+
+            kapok.plot.density(data, otherdata, mask=mask, xlim=xlim, ylim=ylim, xname=xname, yname=yname, units=units, savefile=savefile, **kwargs)
+
+        elif 'hist' in plottype:
+            if (data is None):
+                print('kapok.Scene.plot | Missing data to plot.  Specify "data" keyword argument.  Aborting.')
+                return
+
+            if (xname is None) and (yname is not None):
+                xname = yname
+
+            kapok.plot.hist(data, mask=mask, xlim=xlim, xname=xname, units=units, savefile=savefile, **kwargs)
+
+        elif 'swath' in plottype:
+            if (data is None):
+                print('kapok.Scene.plot | Missing data to plot.  Specify "data" keyword argument.  Aborting.')
+                return
+
+            if (yname is None) and (xname is not None):
+                yname = xname
+
+            kapok.plot.swath(self.inc[:], data, mask=mask, xlim=xlim, ylim=ylim, yname=yname, savefile=savefile, **kwargs)
+
+        else:
+            print('kapok.Scene.plot | Unrecognized plot type: "'+plottype+'".  Aborting.')
+            return
+
+        return
+
+
+    def sfilter(self, outfile, method='seg', segfeatures=None,
+                nlmnoise=None, overwrite=False):
+        """Perform spatial filtering on the covariance matrix.
+
+            The filtered covariance matrix is saved to a newly created
+            Kapok HDF5 file, separate from the current scene!  The function
+            returns the new Kapok Scene object for the filtered data.  The
+            filters each depend on external Python libraries.  You will
+            need to have these libraries installed to use this function
+            (rsgislib for segmentation filtering, and nlsartoolbox for
+            non-local means filtering--see links below).
+
+            Note that this is just an easy interface method for the filtering
+            functions.  The algorithms are implemented in the kapok.spatial
+            module.
+
+            Current filtering methods:
+                'segment': Average pixels within segments.  Segmentation
+                    performed using the rsgislib library
+                    (http://www.rsgislib.org/).  Features for segmentation
+                    can be provided in the keyword 'segfeatures' (e.g.,
+                    if you wish to use external features from lidar or
+                    other data).  By default, the coherence magnitudes as well
+                    as the height differences between different phase centers
+                    are used as features.
+                'nlm': Non-local means filtering performed using the
+                    nlsartoolbox library
+                    (https://www.math.u-bordeaux.fr/~cdeledal/nlsar.php).
+
+            Arguments:
+                outfile (str): Path and filename for the new filtered Kapok
+                    HDF5 file.
+                method (str): String describing the filtering method
+                    to use.  Current options are 'seg' for segmentation or
+                    'nlm' for non-local means.  Default: 'seg'.
+                segfeatures (array): Array of features to use for the
+                    segmentation.  Array should have dimensions (P, Az, Rng),
+                    where P is the number of features, Az is the azimuth size,
+                    and range is the range size.
+                nlmnoise: The non-local means filter needs a sample
+                    of homogeneous data from which to estimate the noise.
+                    This keyword can either be set to a four-element tuple
+                    containing the (azmin,azmax,rngmin,rngmax) bounds of
+                    a suitable noise subset.  Alternatively, you can give
+                    an array containing the actual noise covariance matrix.
+                overwrite (bool): Set to True to overwrite outfile, if it
+                    already exists.  Default: False.
+
+            Returns:
+                filtered (Scene object): Newly created Kapok Scene object
+                    with the filtered covariance matrix.  Note: Coherence
+                    optimization will need to be rerun for the filtered data.
+
+        """
+        import kapok.spatial
+
+        if 'nl' in method:
+            filtered = kapok.spatial.nlmfilter(self, outfile, nlmnoise, overwrite=overwrite)
+        else:
+            filtered = kapok.spatial.segfilter(self, outfile, segfeatures=segfeatures, overwrite=overwrite)
+
+        return filtered
 
 
     def subset(self, outfile, bounds=None, tracks=None, overwrite=False):
         """Subset the Kapok Scene (either spatially or by track), and
             create a new HDF5 file containing the subsetted data.
-            
+
             Note that HDF5 datasets in the 'products/' and
             'ancillary/' groups will not be transferred.  They will
             need to be recreated/reimported.
-            
+
             Arguments:
                 outfile (str): Path and filename for the new subsetted
                     Kapok HDF5 file.
@@ -1492,63 +1659,63 @@ class Scene(object):
                     (keep all tracks).
                 overwrite (bool): Set to True to overwrite outfile if
                     it already exists.  Default: False.
-                    
+
             Returns:
                 subsetted (Scene object): Newly created Kapok Scene object
                     containing the subsetted data.
-            
+
         """
-        # Create the new HDF5 file.        
+        # Create the new HDF5 file.
         if overwrite:
             try:
                 f = h5py.File(outfile,'w')
             except:
                 print('kapok.Scene.subset | Cannot create new HDF5 file. Check if path is valid. Aborting.')
-                return None 
+                return None
         else:
             try:
                 f = h5py.File(outfile,'x')
             except:
                 print('kapok.Scene.subset | Cannot create new HDF5 file. Check if path is valid and ensure file does not already exist. Aborting.')
                 return None
-        
+
         if (bounds is None) and (tracks is None):
             print('kapok.Scene.subset | No subset bounds or subset tracks specified. No subsetting performed. Aborting.')
             return None
-            
+
         bounds_set = True
         if bounds is None:
             bounds_set = False
             bounds = (0, self.dim[0], 0, self.dim[1])
         elif len(bounds) == 2:
             bounds = (bounds[0], bounds[1], 0, self.dim[1])
-            
+
         tracks_set = True
         if tracks is None:
             tracks_set = False
-            tracks = np.linspace(0, self.num_tracks-1, num=self.num_tracks)
+            tracks = np.arange(0, self.num_tracks)
         else:
             tracks = np.array(tracks)
-            
+
         print('kapok.Scene.subset | Creating subset. ('+time.ctime()+')')
-        
-        
+
+
         # Create subsetted covariance matrix.
         num_cov_elements = len(tracks) * self.num_pol
         cov_subset = f.create_dataset('cov', (bounds[1]-bounds[0], bounds[3]-bounds[2], num_cov_elements, num_cov_elements), dtype='complex64', compression=self.compression, shuffle=True, compression_opts=self.compression_opts)
-        
-        
+
+
         # Create subsetted kz dataset.
         kz = f.create_dataset('kz', (len(tracks), bounds[1]-bounds[0], bounds[3]-bounds[2]), dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
-        
-        
+
+
         # Copy polarimetric T covariance matrices and kz values.
         for m, tr in enumerate(tracks):
             row = tr * self.num_pol
             row_new = m * self.num_pol
             cov_subset[:,:,row_new:row_new+self.num_pol,row_new:row_new+self.num_pol] = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],row:row+self.num_pol,row:row+self.num_pol]
             kz[m] = self.kza[tr,bounds[0]:bounds[1],bounds[2]:bounds[3]]
-            
+
         # Copy interferometric Omega covariance matrices.
         for m, tr1 in enumerate(tracks[0:-1]):
             for n, tr2 in enumerate(tracks[m+1:]):
@@ -1557,17 +1724,17 @@ class Scene(object):
                 row_new = m * self.num_pol
                 col_new = (m+n+1) * self.num_pol
                 cov_subset[:,:,row_new:row_new+self.num_pol,col_new:col_new+self.num_pol] = self.cov[bounds[0]:bounds[1],bounds[2]:bounds[3],row:row+self.num_pol,col:col+self.num_pol]
-                
+
         f.flush()
-        
+
         # Copy covariance matrix attributes.
         for key in self.f['cov'].attrs:
             cov_subset.attrs[key] = self.f['cov'].attrs[key]
-            
+
         # Copy kz attributes.
         for key in self.f['kz'].attrs:
-            kz.attrs[key] = self.f['kz'].attrs[key]            
-        
+            kz.attrs[key] = self.f['kz'].attrs[key]
+
         # Copy latitudes and attributes.
         lat = f.create_dataset('lat', data=self.f['lat'][bounds[0]:bounds[1],bounds[2]:bounds[3]], dtype='float32', compression=self.compression, compression_opts=self.compression_opts)
         for key in self.f['lat'].attrs:
@@ -1591,62 +1758,102 @@ class Scene(object):
         # Copy main attributes.
         for key in self.f.attrs:
             f.attrs[key] = self.f.attrs[key]
-        
+
         # Update dimensions.
         if bounds_set:
             f.attrs['dim'] = (bounds[1]-bounds[0], bounds[3]-bounds[2])
-        
+
         # Update track attributes.
         if tracks_set:
             f.attrs['tracks'] = self.f.attrs['tracks'][tracks]
             f.attrs['num_tracks'] = len(tracks)
             f.attrs['num_baselines'] = mb_num_baselines(len(tracks))
-        
+
         # Update subset attributes, if necessary.
         if bounds_set:
             f.attrs['subset'] = True
-            azstart_slc = (bounds[0]*self.ml_window[0]) + self.f.attrs['azimuth_bounds_slc'][0]
-            azend_slc = (bounds[1]*self.ml_window[0]) + self.f.attrs['azimuth_bounds_slc'][0]
-            rngstart_slc = (bounds[2]*self.ml_window[1]) + self.f.attrs['range_bounds_slc'][0]
-            rngend_slc = (bounds[3]*self.ml_window[1]) + self.f.attrs['range_bounds_slc'][0]
-            f.attrs['azimuth_bounds_slc'] = [azstart_slc, azend_slc]
-            f.attrs['range_bounds_slc'] = [rngstart_slc, rngend_slc]
-            
+            try:
+                azstart_slc = (bounds[0]*self.ml_window[0]) + self.f.attrs['azimuth_bounds_slc'][0]
+                azend_slc = (bounds[1]*self.ml_window[0]) + self.f.attrs['azimuth_bounds_slc'][0]
+                rngstart_slc = (bounds[2]*self.ml_window[1]) + self.f.attrs['range_bounds_slc'][0]
+                rngend_slc = (bounds[3]*self.ml_window[1]) + self.f.attrs['range_bounds_slc'][0]
+                f.attrs['azimuth_bounds_slc'] = [azstart_slc, azend_slc]
+                f.attrs['range_bounds_slc'] = [rngstart_slc, rngend_slc]
+            except:
+                pass
+
         f.flush()
-        
+
         # Copy phase diversity coherence optimization datasets, if they exist.
-        if 'pdopt/coh' in self.f:        
+        if 'pdopt/coh' in self.f:
             pdcoh = f.create_dataset('pdopt/coh', (f.attrs['num_baselines'], 2, bounds[1]-bounds[0], bounds[3]-bounds[2]), dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
-            
+
             f['pdopt'].attrs['name'] = 'Phase Diversity Coherence Optimization'
             f['pdopt'].attrs['regularization_factor'] = self.f['pdopt'].attrs['regularization_factor']
-            
+
             for bl in range(f.attrs['num_baselines']):
                 tr_new = mb_tr_index(bl)
                 tr_old = (tracks[tr_new[0]], tracks[tr_new[1]])
                 bl_old = mb_bl_index(tr_old[0], tr_old[1])
                 pdcoh[bl] = self.pdcoh[bl_old,:,bounds[0]:bounds[1],bounds[2]:bounds[3]]
-        
-        if 'pdopt/weights' in self.f:           
+
+        if 'pdopt/weights' in self.f:
             pdweights = f.create_dataset('pdopt/weights', (f.attrs['num_baselines'], 2, bounds[1]-bounds[0], bounds[3]-bounds[2], 3), dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
-            
+
             for bl in range(f.attrs['num_baselines']):
                 tr_new = mb_tr_index(bl)
                 tr_old = (tracks[tr_new[0]], tracks[tr_new[1]])
                 bl_old = mb_bl_index(tr_old[0], tr_old[1])
                 pdweights[bl] = self.pdweights[bl_old,:,bounds[0]:bounds[1],bounds[2]:bounds[3],:]
-            
+
         if 'pdopt/cohminor' in self.f:
             pdcohminor = f.create_dataset('pdopt/cohminor', (f.attrs['num_baselines'], 2, bounds[1]-bounds[0], bounds[3]-bounds[2]), dtype='complex64', compression=self.compression, compression_opts=self.compression_opts)
-            
+
             for bl in range(f.attrs['num_baselines']):
                 tr_new = mb_tr_index(bl)
                 tr_old = (tracks[tr_new[0]], tracks[tr_new[1]])
                 bl_old = mb_bl_index(tr_old[0], tr_old[1])
                 pdcohminor[bl] = self.pdcohminor[bl_old,:,bounds[0]:bounds[1],bounds[2]:bounds[3]]
-        
-        
+
+
         # Close the file, then return it as a Scene object.
         f.close()
         print('kapok.Scene.subset | Complete. ('+time.ctime()+')')
         return kapok.Scene(outfile)
+
+    def void_mask(self, bl=0):
+        """ Return a mask of void pixels for the given baseline index.
+            This can be used to exclude pixels which had very small
+            or zero values in the SLCs, or pixels where the coherence
+            optimization has not converged.
+        """
+        if isinstance(bl, (collections.abc.Sequence, np.ndarray)):
+            # multi-baseline case, data should be valid for all baselines
+            void_mask = np.zeros(self.dim, dtype='bool')
+            for single_baseline in bl:
+                void_mask = void_mask | self.void_mask(bl=single_baseline)
+            return void_mask
+
+        valid_mask = np.ones(self.dim, dtype='bool')
+        tr1, tr2 = mb_tr_index(bl=bl)
+
+        temp = self.power(pol='HV', tr=tr1)
+        valid_mask = valid_mask & (temp > 1e-8)
+
+        temp = self.power(pol='HV', tr=tr2)
+        valid_mask = valid_mask & (temp > 1e-8)
+
+        temp = self.coh(pol='high', bl=bl)
+        valid_mask = valid_mask & (np.abs(temp) >= 0) & (np.abs(temp) <= 1)
+
+        temp = self.coh(pol='low', bl=bl)
+        valid_mask = valid_mask & (np.abs(temp) >= 0) & (np.abs(temp) <= 1)
+
+        return ~valid_mask
+
+
+# If this .py file is called directly, start the Kapok GUI.
+if __name__ == "__main__":
+    import pyforms
+    import kapok.gui
+    pyforms.start_app(kapok.gui.KapokGUI)

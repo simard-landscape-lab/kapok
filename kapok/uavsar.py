@@ -30,7 +30,7 @@ import numpy as np
 
 try: # Import Cython Implementation
     import pyximport; pyximport.install(setup_args={"include_dirs":np.get_include()})
-    from .uavsarc import load, Ann, findsegment, getslcblock, quicklook
+    from .uavsarc import load, Ann, findsegment, getslcblock, quicklook, merge_reference_slcs
 except ImportError: # Cython Import Failed
     print('kapok.uavsar | WARNING: Cython import failed.  Using native Python (will be slow).')
-    from .uavsarp import load, Ann, findsegment, getslcblock, quicklook
+    from .uavsarp import load, Ann, findsegment, getslcblock, quicklook, merge_reference_slcs
